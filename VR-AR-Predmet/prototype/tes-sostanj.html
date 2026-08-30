@@ -403,8 +403,11 @@
 
   // ---------------- world data ----------------
   // TOWER = invisible collision footprint used for movement/climbing physics only.
-  var TOWER = { x:0, z:14, halfW:5, halfD:5, height:42 };
+  // halfW/halfD must fully contain TOWER_VIS's largest ring radius (see below) so the
+  // player can never walk or climb inside the visible tower mesh.
+  var TOWER = { x:0, z:14, halfW:7.6, halfD:7.6, height:42 };
   var WALL_Z = TOWER.z - TOWER.halfD;
+  var LADDER_HALF_X = 1.7; // width of the climbable ladder zone on the tower's front face
   var EYE_HEIGHT = 1.7;
 
   // Sun position (true 3D point, used both for the rendered sun disc and for lighting direction).
@@ -416,9 +419,10 @@
   }
 
   // Realistic hyperboloid cooling-tower silhouette: ring radii at height fractions.
+  // Kept subtle (max 7.0) so the ladder can hug the surface without a large visual gap.
   var TOWER_VIS = {
     x: TOWER.x, z: TOWER.z, height: TOWER.height,
-    rings: [ {t:0,r:9.4}, {t:0.16,r:7.9}, {t:0.34,r:6.6}, {t:0.5,r:6.05}, {t:0.68,r:6.5}, {t:0.85,r:7.6}, {t:1,r:8.7} ]
+    rings: [ {t:0,r:7.0}, {t:0.16,r:6.5}, {t:0.34,r:6.15}, {t:0.5,r:6.05}, {t:0.68,r:6.2}, {t:0.85,r:6.5}, {t:1,r:6.9} ]
   };
   var TOWER_FACES = [];
   (function buildTowerFaces(){
@@ -474,7 +478,10 @@
   var AUX_BUILDINGS = [
     { x:-15, z:22, halfW:3.2, halfD:3.2, height:11, color:[80,92,102] },
     { x:17,  z:27, halfW:2.4, halfD:2.4, height:7,  color:[122,84,58]  },
-    { x:-9,  z:34, halfW:2,   halfD:2,   height:16, color:[70,80,90]  }
+    { x:-9,  z:34, halfW:2,   halfD:2,   height:16, color:[70,80,90]  },
+    { x:-24, z:44, halfW:5.5, halfD:3.6, height:9,  color:[95,88,80]  },
+    { x:22,  z:52, halfW:2.8, halfD:2.8, height:13, color:[88,96,100] },
+    { x:-6,  z:56, halfW:1.6, halfD:1.6, height:6,  color:[132,96,64] }
   ];
 
   // power line pylons, receding toward the horizon for context/scale
@@ -482,6 +489,53 @@
   (function buildPylons(){
     for (var p = 0; p < 6; p++){
       PYLONS.push({ x: 26 + p*2, z: 30 + p*22, height: 9 + (p%2) });
+    }
+  })();
+
+  // the tall striped smokestack (dimnik) - the other unmistakable TEŠ landmark
+  var CHIMNEY = { x:36, z:40, height:64, baseR:2.9, topR:1.8 };
+  var CHIMNEY_FACES = [];
+  (function buildChimneyFaces(){
+    var SEG = 14, BANDS = 8;
+    for (var i = 0; i < BANDS; i++){
+      var t0 = i/BANDS, t1 = (i+1)/BANDS;
+      var y0 = t0*CHIMNEY.height, y1 = t1*CHIMNEY.height;
+      var r0 = lerp(CHIMNEY.baseR, CHIMNEY.topR, t0), r1 = lerp(CHIMNEY.baseR, CHIMNEY.topR, t1);
+      var bandColor = (i % 2 === 0) ? [232,232,228] : [176,46,38];
+      for (var j = 0; j < SEG; j++){
+        var a0 = (j/SEG)*Math.PI*2, a1 = ((j+1)/SEG)*Math.PI*2;
+        var v00 = { x:CHIMNEY.x+r0*Math.cos(a0), y:y0, z:CHIMNEY.z+r0*Math.sin(a0) };
+        var v01 = { x:CHIMNEY.x+r0*Math.cos(a1), y:y0, z:CHIMNEY.z+r0*Math.sin(a1) };
+        var v11 = { x:CHIMNEY.x+r1*Math.cos(a1), y:y1, z:CHIMNEY.z+r1*Math.sin(a1) };
+        var v10 = { x:CHIMNEY.x+r1*Math.cos(a0), y:y1, z:CHIMNEY.z+r1*Math.sin(a0) };
+        var e1 = { x:v01.x-v00.x, y:v01.y-v00.y, z:v01.z-v00.z };
+        var e2 = { x:v10.x-v00.x, y:v10.y-v00.y, z:v10.z-v00.z };
+        var n = norm(cross(e1, e2));
+        var amid = (a0+a1)/2;
+        var outward = { x:Math.cos(amid), y:0, z:Math.sin(amid) };
+        if (dot(n, outward) < 0) n = { x:-n.x, y:-n.y, z:-n.z };
+        var center = { x:(v00.x+v01.x+v11.x+v10.x)/4, y:(y0+y1)/2, z:(v00.z+v01.z+v11.z+v10.z)/4 };
+        CHIMNEY_FACES.push({ normal:n, verts:[v00,v01,v11,v10], center:center, color:bandColor, shade:shadeForNormal(n) });
+      }
+    }
+    var capR = CHIMNEY.topR, capVerts = [];
+    for (var k = 0; k < SEG; k++){
+      var ak = (k/SEG)*Math.PI*2;
+      capVerts.push({ x:CHIMNEY.x+capR*Math.cos(ak), y:CHIMNEY.height, z:CHIMNEY.z+capR*Math.sin(ak) });
+    }
+    var capN = {x:0,y:1,z:0};
+    CHIMNEY_FACES.push({ normal:capN, verts:capVerts, center:{x:CHIMNEY.x,y:CHIMNEY.height,z:CHIMNEY.z}, color:[40,40,42], shade:shadeForNormal(capN) });
+  })();
+
+  // trees scattered around the complex, kept clear of the tower footprint
+  var TREES = [];
+  (function buildTrees(){
+    for (var i = 0; i < 18; i++){
+      var seed = i*5.19;
+      var tx = (pseudoRandom(seed) - 0.5) * 150;
+      var tz = 8 + pseudoRandom(seed+1) * 140;
+      if (Math.hypot(tx-TOWER.x, tz-TOWER.z) < 13) continue;
+      TREES.push({ x:tx, z:tz, h: 3.2+pseudoRandom(seed+2)*2.6, w: 1.5+pseudoRandom(seed+3)*1.1 });
     }
   })();
 
@@ -653,19 +707,27 @@
       var speed = 6.5;
       var nx = player.x + dx*speed*dt;
       var nz = player.z + dz*speed*dt;
-      var withinX = nx > TOWER.x - TOWER.halfW + 0.6 && nx < TOWER.x + TOWER.halfW - 0.6;
+      var withinLadderX = nx > TOWER.x - LADDER_HALF_X && nx < TOWER.x + LADDER_HALF_X;
 
-      if (nz >= WALL_Z - 0.5 && withinX){
+      if (nz >= WALL_Z - 0.5 && withinLadderX){
         if (mf > 0){
           player.phase = 'climbing';
           player.z = WALL_Z - 0.5;
-          player.x = clamp(nx, TOWER.x - TOWER.halfW + 0.8, TOWER.x + TOWER.halfW - 0.8);
+          player.x = clamp(nx, TOWER.x - LADDER_HALF_X + 0.3, TOWER.x + LADDER_HALF_X - 0.3);
         } else {
           player.x = nx;
           player.z = Math.min(nz, WALL_Z - 0.5);
         }
       } else {
-        player.x = nx; player.z = nz;
+        // circular collision against the tower body everywhere else (walking around it)
+        var distC = Math.hypot(nx - TOWER.x, nz - TOWER.z);
+        if (distC < TOWER.halfW){
+          var s = TOWER.halfW / Math.max(distC, 0.001);
+          player.x = TOWER.x + (nx - TOWER.x) * s;
+          player.z = TOWER.z + (nz - TOWER.z) * s;
+        } else {
+          player.x = nx; player.z = nz;
+        }
       }
     } else if (player.phase === 'climbing'){
       var climbSpeed = 9;
@@ -673,7 +735,7 @@
       if (mf < 0) player.groundY -= climbSpeed * dt;
       player.groundY = clamp(player.groundY, 0, TOWER.height);
       if (mr !== 0){
-        player.x = clamp(player.x + mr*4*dt, TOWER.x - TOWER.halfW + 0.8, TOWER.x + TOWER.halfW - 0.8);
+        player.x = clamp(player.x + mr*4*dt, TOWER.x - LADDER_HALF_X + 0.3, TOWER.x + LADDER_HALF_X - 0.3);
       }
       if (player.groundY <= 0){
         player.phase = 'ground';
@@ -681,7 +743,6 @@
       } else if (player.groundY >= TOWER.height){
         player.phase = 'top';
         player.groundY = TOWER.height;
-        player.z = clamp(player.z, TOWER.z - TOWER.halfD + 0.8, TOWER.z + TOWER.halfD - 0.8);
       }
       updateHistoryCard();
     } else if (player.phase === 'top'){
@@ -689,11 +750,18 @@
       var len2 = Math.hypot(dx2, dz2);
       if (len2 > 0){ dx2/=len2; dz2/=len2; }
       var speed2 = 5.2;
-      var xMin = TOWER.x - TOWER.halfW + 0.6, xMax = TOWER.x + TOWER.halfW - 0.6;
-      var zMin = TOWER.z - TOWER.halfD + 0.6, zMax = TOWER.z + TOWER.halfD - 0.6;
-      player.x = clamp(player.x + dx2*speed2*dt, xMin, xMax);
-      player.z = clamp(player.z + dz2*speed2*dt, zMin, zMax);
-      var edgeDist = Math.min(player.x - xMin, xMax - player.x, player.z - zMin, zMax - player.z);
+      var nx2 = player.x + dx2*speed2*dt;
+      var nz2 = player.z + dz2*speed2*dt;
+      var topR = TOWER_VIS.rings[TOWER_VIS.rings.length-1].r - 0.7;
+      var dcx2 = nx2 - TOWER.x, dcz2 = nz2 - TOWER.z;
+      var dist2 = Math.hypot(dcx2, dcz2);
+      if (dist2 > topR){
+        var s2 = topR / dist2;
+        nx2 = TOWER.x + dcx2*s2; nz2 = TOWER.z + dcz2*s2;
+        dist2 = topR;
+      }
+      player.x = nx2; player.z = nz2;
+      var edgeDist = topR - dist2;
       vertigo = clamp(1 - edgeDist / 1.6, 0, 1);
     }
 
@@ -965,7 +1033,7 @@
   }
 
   function drawBuildings(){
-    var faces = TOWER_FACES.concat([]);
+    var faces = TOWER_FACES.concat(CHIMNEY_FACES);
     AUX_BUILDINGS.forEach(function(b){ faces = faces.concat(buildAuxFaces(b, b.color)); });
 
     var visible = [];
@@ -1061,7 +1129,7 @@
     var segN = 28;
     for (var i = 0; i <= segN; i++){
       var a = (i/segN)*Math.PI*2;
-      pts.push({ x: TOWER.x + Math.cos(a)*10.2, y:0.02, z: TOWER.z + Math.sin(a)*10.2 });
+      pts.push({ x: TOWER.x + Math.cos(a)*7.8, y:0.02, z: TOWER.z + Math.sin(a)*7.8 });
     }
     var proj = [];
     pts.forEach(function(p){
@@ -1099,6 +1167,58 @@
     });
   }
 
+  function drawTrees(){
+    var sky = skyColors();
+    TREES.forEach(function(t){
+      var cpBase = toCamera({x:t.x, y:0, z:t.z});
+      if (cpBase.z < 1) return;
+      var baseP = project(cpBase);
+      var topP = project(toCamera({x:t.x, y:t.h, z:t.z}));
+      if (!baseP || !topP) return;
+      var screenH = Math.abs(baseP.y - topP.y);
+      if (screenH < 3 || screenH > H*1.2) return;
+      var screenW = screenH * 0.6;
+      var fog = clamp(cpBase.z / 140, 0, 1);
+
+      var trunk = [ lerp(58,sky.hor[0],fog*0.7), lerp(42,sky.hor[1],fog*0.7), lerp(30,sky.hor[2],fog*0.7) ];
+      ctx.fillStyle = rgbaStr(trunk, 1);
+      var trunkW = Math.max(1, screenW*0.12);
+      ctx.fillRect(baseP.x - trunkW/2, baseP.y - screenH*0.35, trunkW, screenH*0.35);
+
+      var foliage = [ lerp(44,sky.hor[0],fog*0.7), lerp(76,sky.hor[1],fog*0.7), lerp(42,sky.hor[2],fog*0.7) ];
+      ctx.fillStyle = rgbaStr(foliage, 1);
+      var cy = baseP.y - screenH*0.62;
+      ctx.beginPath(); ctx.ellipse(baseP.x, cy, screenW*0.55, screenH*0.42, 0, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(baseP.x - screenW*0.34, cy + screenH*0.09, screenW*0.4, screenH*0.32, 0, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(baseP.x + screenW*0.34, cy + screenH*0.09, screenW*0.4, screenH*0.32, 0, 0, Math.PI*2); ctx.fill();
+    });
+  }
+
+  function drawSmoke(ts){
+    var top = { x:CHIMNEY.x, y:CHIMNEY.height+1, z:CHIMNEY.z };
+    var cp = toCamera(top);
+    if (cp.z < 1) return;
+    var p = project(cp);
+    if (!p) return;
+    var dist = Math.hypot(cp.x, cp.y, cp.z);
+    var scale = clamp(320/dist, 0.12, 3);
+    var now = ts * 0.001;
+    ctx.save();
+    if (typeof ctx.filter === 'string') ctx.filter = 'blur(5px)';
+    for (var i = 0; i < 5; i++){
+      var age = ((now*0.12 + i/5) % 1);
+      var rise = age * 100 * scale;
+      var drift = Math.sin(now*0.5 + i*1.7) * 12 * scale * age;
+      var alpha = (1-age) * 0.45;
+      var r = (7 + age*24) * scale;
+      ctx.beginPath();
+      ctx.ellipse(p.x + drift, p.y - rise, r, r*0.8, 0, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(230,230,234,' + alpha + ')';
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function drawVertigoOverlay(){
     // subtle always-on vignette for cinematic depth
     var baseVg = ctx.createRadialGradient(W/2, H/2, H*0.45, W/2, H/2, H*0.95);
@@ -1129,7 +1249,9 @@
     drawGrid();
     drawContactShadow();
     drawPylons();
+    drawTrees();
     drawBuildings();
+    drawSmoke(ts);
     drawLadder();
     drawHolds();
     drawVertigoOverlay();
