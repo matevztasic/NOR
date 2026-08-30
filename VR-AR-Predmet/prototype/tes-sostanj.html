@@ -426,7 +426,7 @@
   };
   var TOWER_FACES = [];
   (function buildTowerFaces(){
-    var SEG = 28;
+    var SEG = 20;
     var rings = TOWER_VIS.rings;
     for (var i = 0; i < rings.length - 1; i++){
       var y0 = rings[i].t * TOWER_VIS.height, y1 = rings[i+1].t * TOWER_VIS.height;
@@ -497,7 +497,7 @@
   var CHIMNEY = { x:36, z:40, height:64, baseR:2.9, topR:1.8 };
   var CHIMNEY_FACES = [];
   (function buildChimneyFaces(){
-    var SEG = 14, BANDS = 8;
+    var SEG = 10, BANDS = 6;
     for (var i = 0; i < BANDS; i++){
       var t0 = i/BANDS, t1 = (i+1)/BANDS;
       var y0 = t0*CHIMNEY.height, y1 = t1*CHIMNEY.height;
@@ -1159,7 +1159,10 @@
       for (var j = 1; j < pts.length; j++) ctx.lineTo(pts[j].x, pts[j].y);
       ctx.closePath();
 
-      if (maxY > minY + 0.5){
+      // skip the extra gradient allocation for small/far faces - not visible anyway, and it's
+      // one of the main per-frame costs when many faces are on screen at once
+      var screenSize = maxY - minY;
+      if (screenSize > 26){
         var faceGrad = ctx.createLinearGradient(0, minY, 0, maxY);
         faceGrad.addColorStop(0, rgbStr(topTone));
         faceGrad.addColorStop(0.72, rgbStr(finalColor));
@@ -1169,11 +1172,14 @@
         ctx.fillStyle = rgbStr(finalColor);
       }
       ctx.fill();
-      ctx.strokeStyle = rgbaStr([baseTone[0]*0.55, baseTone[1]*0.55, baseTone[2]*0.55], 0.4);
-      ctx.lineWidth = 1;
-      ctx.stroke();
 
-      if (f.isWall) drawWindowsOnFace(f);
+      if (screenSize > 14){
+        ctx.strokeStyle = rgbaStr([baseTone[0]*0.55, baseTone[1]*0.55, baseTone[2]*0.55], 0.4);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      if (f.isWall && screenSize > 34) drawWindowsOnFace(f);
     });
   }
 
@@ -1193,10 +1199,10 @@
     if (widthLen < 2.5 || heightLen < 2) return;
 
     var centerCam = toCamera(f.center);
-    if (centerCam.z < 1.5 || centerCam.z > 130) return;
+    if (centerCam.z < 1.5 || centerCam.z > 65) return;
 
-    var cols = clamp(Math.round(widthLen/2.1), 2, 6);
-    var rows = clamp(Math.round(heightLen/2.4), 2, 5);
+    var cols = clamp(Math.round(widthLen/2.6), 2, 4);
+    var rows = clamp(Math.round(heightLen/3), 2, 3);
 
     for (var r = 0; r < rows; r++){
       for (var c = 0; c < cols; c++){
