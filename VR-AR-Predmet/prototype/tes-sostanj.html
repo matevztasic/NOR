@@ -402,9 +402,74 @@
   backdrop.addEventListener('click', function(){ infoPanel.classList.remove('open'); backdrop.classList.remove('open'); });
 
   // ---------------- world data ----------------
+  // TOWER = invisible collision footprint used for movement/climbing physics only.
   var TOWER = { x:0, z:14, halfW:5, halfD:5, height:42 };
   var WALL_Z = TOWER.z - TOWER.halfD;
   var EYE_HEIGHT = 1.7;
+
+  // Sun position (true 3D point, used both for the rendered sun disc and for lighting direction).
+  var SUN_WORLD = { x: 240, y: 150, z: TOWER.z - 90 };
+  var LIGHT_DIR = norm({ x: SUN_WORLD.x - TOWER.x, y: SUN_WORLD.y - TOWER.height*0.4, z: SUN_WORLD.z - TOWER.z });
+  function shadeForNormal(n){
+    var d = Math.max(0, dot(n, LIGHT_DIR));
+    return clamp(0.38 + d*0.85, 0.3, 1.28);
+  }
+
+  // Realistic hyperboloid cooling-tower silhouette: ring radii at height fractions.
+  var TOWER_VIS = {
+    x: TOWER.x, z: TOWER.z, height: TOWER.height,
+    rings: [ {t:0,r:9.4}, {t:0.16,r:7.9}, {t:0.34,r:6.6}, {t:0.5,r:6.05}, {t:0.68,r:6.5}, {t:0.85,r:7.6}, {t:1,r:8.7} ]
+  };
+  var TOWER_FACES = [];
+  (function buildTowerFaces(){
+    var SEG = 28;
+    var rings = TOWER_VIS.rings;
+    for (var i = 0; i < rings.length - 1; i++){
+      var y0 = rings[i].t * TOWER_VIS.height, y1 = rings[i+1].t * TOWER_VIS.height;
+      var r0 = rings[i].r, r1 = rings[i+1].r;
+      for (var j = 0; j < SEG; j++){
+        var a0 = (j / SEG) * Math.PI*2, a1 = ((j+1) / SEG) * Math.PI*2;
+        var v00 = { x: TOWER_VIS.x + r0*Math.cos(a0), y:y0, z: TOWER_VIS.z + r0*Math.sin(a0) };
+        var v01 = { x: TOWER_VIS.x + r0*Math.cos(a1), y:y0, z: TOWER_VIS.z + r0*Math.sin(a1) };
+        var v11 = { x: TOWER_VIS.x + r1*Math.cos(a1), y:y1, z: TOWER_VIS.z + r1*Math.sin(a1) };
+        var v10 = { x: TOWER_VIS.x + r1*Math.cos(a0), y:y1, z: TOWER_VIS.z + r1*Math.sin(a0) };
+        var e1 = { x:v01.x-v00.x, y:v01.y-v00.y, z:v01.z-v00.z };
+        var e2 = { x:v10.x-v00.x, y:v10.y-v00.y, z:v10.z-v00.z };
+        var n = norm(cross(e1, e2));
+        var amid = (a0+a1)/2;
+        var outward = { x: Math.cos(amid), y:0, z: Math.sin(amid) };
+        if (dot(n, outward) < 0) n = { x:-n.x, y:-n.y, z:-n.z };
+        var center = { x:(v00.x+v01.x+v11.x+v10.x)/4, y:(y0+y1)/2, z:(v00.z+v01.z+v11.z+v10.z)/4 };
+        TOWER_FACES.push({ normal:n, verts:[v00,v01,v11,v10], center:center, color:[96,101,106], shade:shadeForNormal(n) });
+      }
+    }
+    // top cap (walkable platform surface)
+    var topR = rings[rings.length-1].r, topY = TOWER_VIS.height;
+    var capVerts = [];
+    for (var k = 0; k < SEG; k++){
+      var ak = (k/SEG)*Math.PI*2;
+      capVerts.push({ x: TOWER_VIS.x + topR*Math.cos(ak), y:topY, z: TOWER_VIS.z + topR*Math.sin(ak) });
+    }
+    var capNormal = {x:0,y:1,z:0};
+    TOWER_FACES.push({ normal:capNormal, verts:capVerts, center:{x:TOWER_VIS.x,y:topY,z:TOWER_VIS.z}, color:[112,118,122], shade:shadeForNormal(capNormal) });
+  })();
+
+  function buildAuxFaces(box, colorRGB){
+    var xMin = box.x - box.halfW, xMax = box.x + box.halfW;
+    var zMin = box.z - box.halfD, zMax = box.z + box.halfD;
+    var yTop = box.height;
+    var defs = [
+      { normal:{x:0,y:1,z:0}, verts:[{x:xMin,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMax},{x:xMin,y:yTop,z:zMax}] },
+      { normal:{x:0,y:0,z:-1}, verts:[{x:xMin,y:0,z:zMin},{x:xMax,y:0,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMin}] },
+      { normal:{x:0,y:0,z:1}, verts:[{x:xMax,y:0,z:zMax},{x:xMin,y:0,z:zMax},{x:xMin,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMax}] },
+      { normal:{x:-1,y:0,z:0}, verts:[{x:xMin,y:0,z:zMax},{x:xMin,y:0,z:zMin},{x:xMin,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMax}] },
+      { normal:{x:1,y:0,z:0}, verts:[{x:xMax,y:0,z:zMin},{x:xMax,y:0,z:zMax},{x:xMax,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMin}] }
+    ];
+    return defs.map(function(f){
+      f.color = colorRGB; f.center = {x:box.x,y:box.height*0.5,z:box.z}; f.shade = shadeForNormal(f.normal);
+      return f;
+    });
+  }
 
   var AUX_BUILDINGS = [
     { x:-15, z:22, halfW:3.2, halfD:3.2, height:11, color:[80,92,102] },
@@ -412,10 +477,18 @@
     { x:-9,  z:34, halfW:2,   halfD:2,   height:16, color:[70,80,90]  }
   ];
 
+  // power line pylons, receding toward the horizon for context/scale
+  var PYLONS = [];
+  (function buildPylons(){
+    for (var p = 0; p < 6; p++){
+      PYLONS.push({ x: 26 + p*2, z: 30 + p*22, height: 9 + (p%2) });
+    }
+  })();
+
   var HOLDS = [];
   (function buildHolds(){
     for (var y = 3; y < TOWER.height - 2; y += 3.4){
-      HOLDS.push({ y: y, x: (pseudoRandom(y) * 2 - 1) * (TOWER.halfW - 1.2) });
+      HOLDS.push({ y: y, x: (pseudoRandom(y) * 2 - 1) * 1.5 });
     }
   })();
 
@@ -679,44 +752,116 @@
   function drawSkyGround(){
     var sky = skyColors();
     var hy = horizonScreenY();
+    var mid = [ lerp(sky.top[0],sky.hor[0],0.62), lerp(sky.top[1],sky.hor[1],0.62), lerp(sky.top[2],sky.hor[2],0.62) ];
 
     var skyGrad = ctx.createLinearGradient(0, 0, 0, Math.max(hy,1));
     skyGrad.addColorStop(0, rgbStr(sky.top));
+    skyGrad.addColorStop(0.65, rgbStr(mid));
     skyGrad.addColorStop(1, rgbStr(sky.hor));
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, W, Math.max(hy, 0));
 
-    var groundNear = [70, 84, 62];
+    var groundNear = [66, 82, 58];
     var groundGrad = ctx.createLinearGradient(0, hy, 0, H);
     groundGrad.addColorStop(0, rgbStr(sky.hor));
-    groundGrad.addColorStop(0.12, rgbStr(groundNear));
-    groundGrad.addColorStop(1, 'rgb(40,48,38)');
+    groundGrad.addColorStop(0.1, rgbStr(groundNear));
+    groundGrad.addColorStop(1, 'rgb(36,44,34)');
     ctx.fillStyle = groundGrad;
     ctx.fillRect(0, Math.max(hy,0), W, H - Math.max(hy,0));
 
-    // sun (true 3D point far away)
-    var sunWorld = { x: 260, y: 140, z: TOWER.z + 300 };
-    var sunCam = toCamera(sunWorld);
+    // sun (true 3D point far away) with soft glow
+    var sunCam = toCamera(SUN_WORLD);
     var sunP = project(sunCam);
     if (sunP){
+      var glow = ctx.createRadialGradient(sunP.x, sunP.y, 0, sunP.x, sunP.y, 160);
+      glow.addColorStop(0, 'rgba(255,238,200,0.55)');
+      glow.addColorStop(1, 'rgba(255,238,200,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(sunP.x-160, sunP.y-160, 320, 320);
       ctx.beginPath();
-      ctx.arc(sunP.x, sunP.y, 44, 0, Math.PI*2);
-      ctx.fillStyle = 'rgba(255,244,220,0.85)';
+      ctx.arc(sunP.x, sunP.y, 40, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(255,247,225,0.95)';
       ctx.fill();
     }
 
-    // distant hill silhouette (parallax by yaw)
+    // distant hill silhouette (parallax by yaw), two layers for depth
     var offset = -(player.yaw * 220) % (W*2);
-    ctx.fillStyle = rgbaStr([Math.max(sky.hor[0]-60,20), Math.max(sky.hor[1]-50,30), Math.max(sky.hor[2]-40,30)], 0.55);
+    ctx.fillStyle = rgbaStr([Math.max(sky.hor[0]-75,18), Math.max(sky.hor[1]-65,26), Math.max(sky.hor[2]-55,28)], 0.38);
+    drawHillLayer(offset*0.7, hy, 42, 34);
+    ctx.fillStyle = rgbaStr([Math.max(sky.hor[0]-55,22), Math.max(sky.hor[1]-45,32), Math.max(sky.hor[2]-38,32)], 0.6);
+    drawHillLayer(offset, hy, 26, 20);
+
+    if (hy < H){
+      drawRiver(hy);
+      drawGroundPatches(hy);
+    }
+  }
+
+  function drawHillLayer(offset, hy, amp1, amp2){
     ctx.beginPath();
     ctx.moveTo(-W + offset, hy);
-    for (var hx = -W; hx <= W*2; hx += 60){
-      var yy = hy - 26 - 20*Math.sin((hx+1000)*0.006) - 10*Math.sin((hx+300)*0.017);
+    for (var hx = -W; hx <= W*2; hx += 50){
+      var yy = hy - amp1 - amp1*0.5*Math.sin((hx+1000)*0.006) - amp2*0.5*Math.sin((hx+300)*0.017);
       ctx.lineTo(hx + offset, yy);
     }
     ctx.lineTo(W*2 + offset, hy + 40);
     ctx.lineTo(-W + offset, hy + 40);
     ctx.closePath();
+    ctx.fill();
+  }
+
+  // soft mottled field patches + a river band, projected as ground-plane world quads for correct perspective
+  var GROUND_PATCHES = null;
+  function ensureGroundPatches(){
+    if (GROUND_PATCHES) return GROUND_PATCHES;
+    GROUND_PATCHES = [];
+    for (var i = 0; i < 22; i++){
+      var seed = i*7.31;
+      var gx = (pseudoRandom(seed) - 0.5) * 160;
+      var gz = 20 + pseudoRandom(seed+1) * 150;
+      var r = 8 + pseudoRandom(seed+2) * 14;
+      var tone = pseudoRandom(seed+3);
+      GROUND_PATCHES.push({ x:gx, z:gz, r:r, tone:tone });
+    }
+    return GROUND_PATCHES;
+  }
+  function drawGroundPatches(hy){
+    ensureGroundPatches().forEach(function(p){
+      var cp = toCamera({x:p.x, y:0.03, z:p.z});
+      if (cp.z < 1) return;
+      var proj = project(cp);
+      if (!proj) return;
+      var edgeCp = toCamera({x:p.x+p.r, y:0.03, z:p.z});
+      var edgeProj = project(edgeCp);
+      var screenR = edgeProj ? Math.abs(edgeProj.x - proj.x) : 0;
+      if (screenR < 2 || screenR > W) return;
+      var tone = p.tone > 0.5 ? [88,100,60] : [58,72,48];
+      ctx.beginPath();
+      ctx.ellipse(proj.x, proj.y, screenR, screenR*0.34, 0, 0, Math.PI*2);
+      ctx.fillStyle = rgbaStr(tone, 0.28);
+      ctx.fill();
+    });
+  }
+  function drawRiver(hy){
+    var pts = [];
+    var samples = [ {x:-90,z:60}, {x:-50,z:75}, {x:-10,z:66}, {x:30,z:80}, {x:80,z:70}, {x:130,z:90} ];
+    var top = [], bottom = [];
+    samples.forEach(function(s){
+      var a = toCamera({x:s.x, y:0.05, z:s.z});
+      var b = toCamera({x:s.x, y:0.05, z:s.z+6});
+      if (a.z < 1 || b.z < 1) return;
+      var pa = project(a), pb = project(b);
+      if (pa) top.push(pa);
+      if (pb) bottom.push(pb);
+    });
+    if (top.length < 2) return;
+    ctx.beginPath();
+    ctx.moveTo(top[0].x, top[0].y);
+    for (var i=1;i<top.length;i++) ctx.lineTo(top[i].x, top[i].y);
+    for (var j=bottom.length-1;j>=0;j--) ctx.lineTo(bottom[j].x, bottom[j].y);
+    ctx.closePath();
+    var sky = skyColors();
+    ctx.fillStyle = rgbaStr([ lerp(60,sky.hor[0],0.4), lerp(90,sky.hor[1],0.4), lerp(130,sky.hor[2],0.4) ], 0.55);
     ctx.fill();
   }
 
@@ -748,23 +893,9 @@
     return { x: lerp(bad.x, good.x, t), y: lerp(bad.y, good.y, t), z: 0.05 };
   }
 
-  function buildBoxFaces(box, colorRGB){
-    var xMin = box.x - box.halfW, xMax = box.x + box.halfW;
-    var zMin = box.z - box.halfD, zMax = box.z + box.halfD;
-    var yTop = box.height;
-    return [
-      { normal:{x:0,y:1,z:0}, shade:1.15, verts:[{x:xMin,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMax},{x:xMin,y:yTop,z:zMax}] },
-      { normal:{x:0,y:0,z:-1}, shade:1.0, verts:[{x:xMin,y:0,z:zMin},{x:xMax,y:0,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMin}] },
-      { normal:{x:0,y:0,z:1}, shade:0.55, verts:[{x:xMax,y:0,z:zMax},{x:xMin,y:0,z:zMax},{x:xMin,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMax}] },
-      { normal:{x:-1,y:0,z:0}, shade:0.72, verts:[{x:xMin,y:0,z:zMax},{x:xMin,y:0,z:zMin},{x:xMin,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMax}] },
-      { normal:{x:1,y:0,z:0}, shade:0.86, verts:[{x:xMax,y:0,z:zMin},{x:xMax,y:0,z:zMax},{x:xMax,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMin}] }
-    ].map(function(f){ f.color = colorRGB; f.center = {x:box.x,y:box.height*0.5,z:box.z}; return f; });
-  }
-
   function drawBuildings(){
-    var faces = [];
-    faces = faces.concat(buildBoxFaces(TOWER, [90,99,107]));
-    AUX_BUILDINGS.forEach(function(b){ faces = faces.concat(buildBoxFaces(b, b.color)); });
+    var faces = TOWER_FACES.concat([]);
+    AUX_BUILDINGS.forEach(function(b){ faces = faces.concat(buildAuxFaces(b, b.color)); });
 
     var visible = [];
     faces.forEach(function(f){
@@ -841,7 +972,70 @@
     });
   }
 
+  function drawLadder(){
+    if (player.phase === 'top') return;
+    ctx.strokeStyle = 'rgba(40,32,26,0.75)';
+    ctx.lineWidth = 2.4;
+    var railX0 = TOWER.x - 1.15, railX1 = TOWER.x + 1.15, z = WALL_Z - 0.1;
+    drawWorldLine({x:railX0,y:0,z:z}, {x:railX0,y:TOWER.height,z:z});
+    drawWorldLine({x:railX1,y:0,z:z}, {x:railX1,y:TOWER.height,z:z});
+    ctx.lineWidth = 1.6;
+    for (var y = 1; y < TOWER.height; y += 1.4){
+      drawWorldLine({x:railX0,y:y,z:z}, {x:railX1,y:y,z:z});
+    }
+  }
+
+  function drawContactShadow(){
+    var pts = [];
+    var segN = 28;
+    for (var i = 0; i <= segN; i++){
+      var a = (i/segN)*Math.PI*2;
+      pts.push({ x: TOWER.x + Math.cos(a)*10.2, y:0.02, z: TOWER.z + Math.sin(a)*10.2 });
+    }
+    var proj = [];
+    pts.forEach(function(p){
+      var cp = toCamera(p);
+      if (cp.z < 0.05) return;
+      var pr = project(cp);
+      if (pr) proj.push(pr);
+    });
+    if (proj.length < 3) return;
+    ctx.beginPath();
+    ctx.moveTo(proj[0].x, proj[0].y);
+    for (var j = 1; j < proj.length; j++) ctx.lineTo(proj[j].x, proj[j].y);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(10,14,10,0.35)';
+    ctx.fill();
+  }
+
+  function drawPylons(){
+    ctx.strokeStyle = 'rgba(30,34,30,0.6)';
+    ctx.lineWidth = 1.4;
+    var prevTop = null;
+    PYLONS.forEach(function(p){
+      drawWorldLine({x:p.x,y:0,z:p.z}, {x:p.x,y:p.height,z:p.z});
+      drawWorldLine({x:p.x-1.1,y:p.height-0.6,z:p.z}, {x:p.x+1.1,y:p.height-0.6,z:p.z});
+      var top = {x:p.x,y:p.height-0.6,z:p.z};
+      if (prevTop){
+        var midY = Math.min(prevTop.y, top.y) - 0.9;
+        var mid = { x:(prevTop.x+top.x)/2, y:midY, z:(prevTop.z+top.z)/2 };
+        ctx.strokeStyle = 'rgba(20,24,20,0.45)';
+        ctx.lineWidth = 1;
+        drawWorldLine(prevTop, mid);
+        drawWorldLine(mid, top);
+      }
+      prevTop = top;
+    });
+  }
+
   function drawVertigoOverlay(){
+    // subtle always-on vignette for cinematic depth
+    var baseVg = ctx.createRadialGradient(W/2, H/2, H*0.45, W/2, H/2, H*0.95);
+    baseVg.addColorStop(0, 'rgba(0,0,0,0)');
+    baseVg.addColorStop(1, 'rgba(5,6,8,0.32)');
+    ctx.fillStyle = baseVg;
+    ctx.fillRect(0,0,W,H);
+
     if (vertigo <= 0.02) return;
     var vg = ctx.createRadialGradient(W/2, H/2, H*0.22, W/2, H/2, H*0.85);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
@@ -862,7 +1056,10 @@
 
     drawSkyGround();
     drawGrid();
+    drawContactShadow();
+    drawPylons();
     drawBuildings();
+    drawLadder();
     drawHolds();
     drawVertigoOverlay();
 
