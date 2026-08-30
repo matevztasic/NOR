@@ -40,7 +40,7 @@
     width:100%;
     height:100%;
     display:block;
-    cursor:grab;
+    cursor:default;
     touch-action:none;
   }
   canvas#scene.dragging{ cursor:grabbing; }
@@ -301,7 +301,7 @@
 </div>
 
 <div class="hint">
-  <kbd>W A S D</kbd> gibanje · <span id="lookHint">klikni za prost pogled z miško</span><br>
+  <kbd>W A S D</kbd> gibanje · <span id="lookHint">premikaj miško za pogled</span><br>
   Pojdi do stolpa in drži <kbd>W</kbd> za vzpon · <kbd>Shift</kbd> za tek
 </div>
 <button class="icon-btn reset-btn" id="resetBtn">⟲ Ponastavi</button>
@@ -445,16 +445,17 @@
   function buildAuxFaces(box, colorRGB, seed){
     var xMin = box.x - box.halfW, xMax = box.x + box.halfW;
     var zMin = box.z - box.halfD, zMax = box.z + box.halfD;
-    var yTop = box.height;
+    var yBase = box.base || 0;
+    var yTop = yBase + box.height;
     var defs = [
       { normal:{x:0,y:1,z:0}, isWall:false, verts:[{x:xMin,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMax},{x:xMin,y:yTop,z:zMax}] },
-      { normal:{x:0,y:0,z:-1}, isWall:true, verts:[{x:xMin,y:0,z:zMin},{x:xMax,y:0,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMin}] },
-      { normal:{x:0,y:0,z:1}, isWall:true, verts:[{x:xMax,y:0,z:zMax},{x:xMin,y:0,z:zMax},{x:xMin,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMax}] },
-      { normal:{x:-1,y:0,z:0}, isWall:true, verts:[{x:xMin,y:0,z:zMax},{x:xMin,y:0,z:zMin},{x:xMin,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMax}] },
-      { normal:{x:1,y:0,z:0}, isWall:true, verts:[{x:xMax,y:0,z:zMin},{x:xMax,y:0,z:zMax},{x:xMax,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMin}] }
+      { normal:{x:0,y:0,z:-1}, isWall:true, verts:[{x:xMin,y:yBase,z:zMin},{x:xMax,y:yBase,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMin}] },
+      { normal:{x:0,y:0,z:1}, isWall:true, verts:[{x:xMax,y:yBase,z:zMax},{x:xMin,y:yBase,z:zMax},{x:xMin,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMax}] },
+      { normal:{x:-1,y:0,z:0}, isWall:true, verts:[{x:xMin,y:yBase,z:zMax},{x:xMin,y:yBase,z:zMin},{x:xMin,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMax}] },
+      { normal:{x:1,y:0,z:0}, isWall:true, verts:[{x:xMax,y:yBase,z:zMin},{x:xMax,y:yBase,z:zMax},{x:xMax,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMin}] }
     ];
     return defs.map(function(f, i){
-      f.color = colorRGB; f.center = {x:box.x,y:box.height*0.5,z:box.z}; f.shade = shadeForNormal(f.normal);
+      f.color = colorRGB; f.center = {x:box.x,y:(yBase+yTop)*0.5,z:box.z}; f.shade = shadeForNormal(f.normal);
       f.seed = (seed||0)*29 + i*11;
       return f;
     });
@@ -485,6 +486,15 @@
       AUX_BUILDINGS.push({ x:bx, z:bz, halfW:hw, halfD:hd, height:h, color:color });
     }
   })();
+
+  // a small petrol station along the road - shop, canopy roof on poles, two pumps
+  var GAS_STATION = { x:14, z:48 };
+  AUX_BUILDINGS.push(
+    { x:GAS_STATION.x, z:GAS_STATION.z-4, halfW:2.2, halfD:1.8, height:3.4, color:[232,230,222] },
+    { x:GAS_STATION.x, z:GAS_STATION.z+2, halfW:5, halfD:3.2, height:0.35, base:4.2, color:[196,48,42] },
+    { x:GAS_STATION.x-1.6, z:GAS_STATION.z+2, halfW:0.35, halfD:0.35, height:1.3, color:[225,225,230] },
+    { x:GAS_STATION.x+1.6, z:GAS_STATION.z+2, halfW:0.35, halfD:0.35, height:1.3, color:[225,225,230] }
+  );
 
   // power line pylons, receding toward the horizon for context/scale
   var PYLONS = [];
@@ -596,67 +606,25 @@
   });
   window.addEventListener('keyup', function(e){ keys[e.code] = false; });
 
-  // Primary look control: real FPS-style pointer lock (free mouse look, no held button).
-  // Falls back to click-and-drag if the browser/embed context refuses pointer lock.
-  var pointerLockSupported = 'pointerLockElement' in document;
-  var lockFallback = !pointerLockSupported;
-  var isLocked = false;
-  updateLookHint();
-
-  function isCanvasLocked(){
-    return document.pointerLockElement === canvas || document.mozPointerLockElement === canvas;
-  }
-
-  canvas.addEventListener('click', function(){
-    if (lockFallback || !pointerLockSupported) return;
-    if (!isCanvasLocked()){
-      var req = canvas.requestPointerLock();
-      if (req && typeof req.catch === 'function') req.catch(function(){ lockFallback = true; updateLookHint(); });
-    }
-  });
-
-  document.addEventListener('pointerlockchange', function(){
-    isLocked = isCanvasLocked();
-    canvas.classList.toggle('locked', isLocked);
-    updateLookHint();
-  });
-  document.addEventListener('pointerlockerror', function(){
-    lockFallback = true;
-    updateLookHint();
-  });
+  // Look control: cursor position on screen directly sets the view direction - no click,
+  // no pointer lock, no drag required. This needs no special browser permission and cannot
+  // silently fail the way Pointer Lock did, so it is the only look mechanism now.
+  var YAW_RANGE = Math.PI * 0.95;   // how far left/right the full screen width can look
+  var PITCH_RANGE = 1.1;            // how far up/down the full screen height can look
 
   window.addEventListener('mousemove', function(e){
-    if (!isLocked) return;
-    player.yaw += e.movementX * 0.0028;
-    player.pitch = clamp(player.pitch - e.movementY * 0.0028, -1.25, 1.25);
-  });
-
-  // Click-and-drag look, always available as a baseline (not just when pointer lock is
-  // known to have failed) - if the browser silently declines pointer lock without firing
-  // an error event, this still works instead of leaving the player with no way to look around.
-  var drag = { active:false, lastX:0, lastY:0 };
-  canvas.addEventListener('pointerdown', function(e){
-    if (isLocked) return;
-    drag.active = true; drag.lastX = e.clientX; drag.lastY = e.clientY;
-    canvas.classList.add('dragging');
-  });
-  window.addEventListener('pointerup', function(){ drag.active = false; canvas.classList.remove('dragging'); });
-  window.addEventListener('pointermove', function(e){
-    if (isLocked || !drag.active) return;
-    var dx = e.clientX - drag.lastX, dy = e.clientY - drag.lastY;
-    drag.lastX = e.clientX; drag.lastY = e.clientY;
-    player.yaw += dx * 0.0045;
-    player.pitch = clamp(player.pitch - dy * 0.0045, -1.25, 1.25);
+    var rect = canvas.getBoundingClientRect();
+    var nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    var ny = ((e.clientY - rect.top) / rect.height) * 2 - 1;
+    nx = clamp(nx, -1, 1); ny = clamp(ny, -1, 1);
+    player.yaw = nx * YAW_RANGE;
+    player.pitch = clamp(-ny * PITCH_RANGE, -1.25, 1.25);
   });
 
   function updateLookHint(){
     var hint = document.getElementById('lookHint');
     if (!hint) return;
-    if (isLocked){
-      hint.textContent = 'Esc za izhod iz pogleda';
-    } else {
-      hint.textContent = 'Klikni za pogled, ali klik + vleci';
-    }
+    hint.textContent = 'premikaj miško za pogled';
   }
 
   resetBtn.addEventListener('click', function(){
@@ -1424,6 +1392,16 @@
     });
   }
 
+  function drawGasStationPoles(){
+    var cx = GAS_STATION.x, cz = GAS_STATION.z+2;
+    var corners = [ {x:cx-4.6,z:cz-2.8}, {x:cx+4.6,z:cz-2.8}, {x:cx-4.6,z:cz+2.8}, {x:cx+4.6,z:cz+2.8} ];
+    ctx.strokeStyle = 'rgba(210,210,215,0.85)';
+    ctx.lineWidth = 2;
+    corners.forEach(function(p){
+      drawWorldLine({x:p.x,y:0,z:p.z}, {x:p.x,y:4.2,z:p.z});
+    });
+  }
+
   function drawPylons(){
     ctx.strokeStyle = 'rgba(30,34,30,0.6)';
     ctx.lineWidth = 1.4;
@@ -1508,6 +1486,7 @@
     drawContactShadow();
     drawRoad();
     drawPylons();
+    drawGasStationPoles();
     drawTrees();
     drawBuildings();
     drawSmoke(ts);
