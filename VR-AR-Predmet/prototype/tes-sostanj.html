@@ -458,19 +458,20 @@
     TOWER_FACES.push({ normal:capNormal, verts:capVerts, center:{x:TOWER_VIS.x,y:topY,z:TOWER_VIS.z}, color:[112,118,122], shade:shadeForNormal(capNormal) });
   })();
 
-  function buildAuxFaces(box, colorRGB){
+  function buildAuxFaces(box, colorRGB, seed){
     var xMin = box.x - box.halfW, xMax = box.x + box.halfW;
     var zMin = box.z - box.halfD, zMax = box.z + box.halfD;
     var yTop = box.height;
     var defs = [
-      { normal:{x:0,y:1,z:0}, verts:[{x:xMin,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMax},{x:xMin,y:yTop,z:zMax}] },
-      { normal:{x:0,y:0,z:-1}, verts:[{x:xMin,y:0,z:zMin},{x:xMax,y:0,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMin}] },
-      { normal:{x:0,y:0,z:1}, verts:[{x:xMax,y:0,z:zMax},{x:xMin,y:0,z:zMax},{x:xMin,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMax}] },
-      { normal:{x:-1,y:0,z:0}, verts:[{x:xMin,y:0,z:zMax},{x:xMin,y:0,z:zMin},{x:xMin,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMax}] },
-      { normal:{x:1,y:0,z:0}, verts:[{x:xMax,y:0,z:zMin},{x:xMax,y:0,z:zMax},{x:xMax,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMin}] }
+      { normal:{x:0,y:1,z:0}, isWall:false, verts:[{x:xMin,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMax},{x:xMin,y:yTop,z:zMax}] },
+      { normal:{x:0,y:0,z:-1}, isWall:true, verts:[{x:xMin,y:0,z:zMin},{x:xMax,y:0,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMin}] },
+      { normal:{x:0,y:0,z:1}, isWall:true, verts:[{x:xMax,y:0,z:zMax},{x:xMin,y:0,z:zMax},{x:xMin,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMax}] },
+      { normal:{x:-1,y:0,z:0}, isWall:true, verts:[{x:xMin,y:0,z:zMax},{x:xMin,y:0,z:zMin},{x:xMin,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMax}] },
+      { normal:{x:1,y:0,z:0}, isWall:true, verts:[{x:xMax,y:0,z:zMin},{x:xMax,y:0,z:zMax},{x:xMax,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMin}] }
     ];
-    return defs.map(function(f){
+    return defs.map(function(f, i){
       f.color = colorRGB; f.center = {x:box.x,y:box.height*0.5,z:box.z}; f.shade = shadeForNormal(f.normal);
+      f.seed = (seed||0)*29 + i*11;
       return f;
     });
   }
@@ -1034,7 +1035,7 @@
 
   function drawBuildings(){
     var faces = TOWER_FACES.concat(CHIMNEY_FACES);
-    AUX_BUILDINGS.forEach(function(b){ faces = faces.concat(buildAuxFaces(b, b.color)); });
+    AUX_BUILDINGS.forEach(function(b, bi){ faces = faces.concat(buildAuxFaces(b, b.color, bi+1)); });
 
     var visible = [];
     faces.forEach(function(f){
@@ -1082,13 +1083,76 @@
         lerp(shaded[2], sky.hor[2], fog*0.7)
       ];
 
+      // vertical light/AO gradient per face - top catches sky light, base sinks into shadow -
+      // this single change is what keeps flat-shaded polygons from reading as "flat coloured cutouts".
+      var minY = Infinity, maxY = -Infinity;
+      for (var pi = 0; pi < pts.length; pi++){
+        if (pts[pi].y < minY) minY = pts[pi].y;
+        if (pts[pi].y > maxY) maxY = pts[pi].y;
+      }
+      var topTone = [ Math.min(255,finalColor[0]*1.16+6), Math.min(255,finalColor[1]*1.16+6), Math.min(255,finalColor[2]*1.16+6) ];
+      var baseTone = [ finalColor[0]*0.6, finalColor[1]*0.6, finalColor[2]*0.6 ];
+
       ctx.beginPath();
       ctx.moveTo(pts[0].x, pts[0].y);
       for (var j = 1; j < pts.length; j++) ctx.lineTo(pts[j].x, pts[j].y);
       ctx.closePath();
-      ctx.fillStyle = rgbStr(finalColor);
+
+      if (maxY > minY + 0.5){
+        var faceGrad = ctx.createLinearGradient(0, minY, 0, maxY);
+        faceGrad.addColorStop(0, rgbStr(topTone));
+        faceGrad.addColorStop(0.72, rgbStr(finalColor));
+        faceGrad.addColorStop(1, rgbStr(baseTone));
+        ctx.fillStyle = faceGrad;
+      } else {
+        ctx.fillStyle = rgbStr(finalColor);
+      }
       ctx.fill();
+      ctx.strokeStyle = rgbaStr([baseTone[0]*0.55, baseTone[1]*0.55, baseTone[2]*0.55], 0.4);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      if (f.isWall) drawWindowsOnFace(f);
     });
+  }
+
+  function drawWindowsOnFace(f){
+    var p0 = projectWorld(f.verts[0]), p1 = projectWorld(f.verts[1]),
+        p2 = projectWorld(f.verts[2]), p3 = projectWorld(f.verts[3]);
+    if (!p0 || !p1 || !p2 || !p3) return;
+
+    var uAxisX = p1.x-p0.x, uAxisY = p1.y-p0.y;
+    var vAxisX = p3.x-p0.x, vAxisY = p3.y-p0.y;
+    var faceWidthPx = Math.hypot(uAxisX, uAxisY);
+    var faceHeightPx = Math.hypot(vAxisX, vAxisY);
+    if (faceWidthPx < 36 || faceHeightPx < 24) return;
+
+    var cols = clamp(Math.round(faceWidthPx/32), 2, 6);
+    var rows = clamp(Math.round(faceHeightPx/28), 2, 5);
+
+    for (var r = 0; r < rows; r++){
+      for (var c = 0; c < cols; c++){
+        var u = (c+0.5)/cols, v = 0.14 + ((r+0.5)/rows)*0.74;
+        var cx = p0.x + u*uAxisX + v*vAxisX, cy = p0.y + u*uAxisY + v*vAxisY;
+        var lit = pseudoRandom(f.seed + r*13 + c*3) > 0.6;
+        var wu = 0.42/cols, wv = 0.3/rows;
+        var hx = wu*uAxisX, hy = wu*uAxisY, vx = wv*vAxisX, vy = wv*vAxisY;
+        ctx.beginPath();
+        ctx.moveTo(cx-hx-vx, cy-hy-vy);
+        ctx.lineTo(cx+hx-vx, cy+hy-vy);
+        ctx.lineTo(cx+hx+vx, cy+hy+vy);
+        ctx.lineTo(cx-hx+vx, cy-hy+vy);
+        ctx.closePath();
+        ctx.fillStyle = lit ? 'rgba(255,211,138,0.88)' : 'rgba(24,30,40,0.55)';
+        ctx.fill();
+      }
+    }
+  }
+
+  function projectWorld(v){
+    var cp = toCamera(v);
+    if (cp.z < 0.15) return null;
+    return project(cp);
   }
 
   function drawHolds(){
@@ -1124,12 +1188,12 @@
     }
   }
 
-  function drawContactShadow(){
+  function drawGroundShadow(cx, cz, r, alpha){
     var pts = [];
-    var segN = 28;
+    var segN = 22;
     for (var i = 0; i <= segN; i++){
       var a = (i/segN)*Math.PI*2;
-      pts.push({ x: TOWER.x + Math.cos(a)*7.8, y:0.02, z: TOWER.z + Math.sin(a)*7.8 });
+      pts.push({ x: cx + Math.cos(a)*r, y:0.02, z: cz + Math.sin(a)*r });
     }
     var proj = [];
     pts.forEach(function(p){
@@ -1143,8 +1207,16 @@
     ctx.moveTo(proj[0].x, proj[0].y);
     for (var j = 1; j < proj.length; j++) ctx.lineTo(proj[j].x, proj[j].y);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(10,14,10,0.35)';
+    ctx.fillStyle = 'rgba(10,14,10,' + alpha + ')';
     ctx.fill();
+  }
+
+  function drawContactShadow(){
+    drawGroundShadow(TOWER.x, TOWER.z, 7.8, 0.35);
+    drawGroundShadow(CHIMNEY.x, CHIMNEY.z, CHIMNEY.baseR+0.8, 0.3);
+    AUX_BUILDINGS.forEach(function(b){
+      drawGroundShadow(b.x, b.z, Math.max(b.halfW,b.halfD)*1.25, 0.28);
+    });
   }
 
   function drawPylons(){
