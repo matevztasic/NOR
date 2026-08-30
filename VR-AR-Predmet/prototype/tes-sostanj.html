@@ -954,6 +954,7 @@
     drawClouds(hy);
 
     if (hy < H){
+      drawLake();
       drawRiver(hy);
       drawGroundPatches(hy);
     }
@@ -1080,6 +1081,29 @@
       ctx.fill();
     });
   }
+  // Velenjsko jezero - the real subsidence lake near TEŠ, placed far off as a landmark
+  // best appreciated from up on the tower.
+  var LAKE = { x:-150, z:220, r:46 };
+  function drawLake(){
+    var cp = toCamera({x:LAKE.x, y:0.04, z:LAKE.z});
+    if (cp.z < 4) return;
+    var proj = project(cp);
+    if (!proj) return;
+    var edgeCp = toCamera({x:LAKE.x+LAKE.r, y:0.04, z:LAKE.z});
+    var edgeProj = project(edgeCp);
+    var screenR = edgeProj ? Math.abs(edgeProj.x - proj.x) : 0;
+    if (screenR < 3 || screenR > W*2) return;
+    var sky = skyColors();
+    ctx.beginPath();
+    ctx.ellipse(proj.x, proj.y, screenR, screenR*0.4, 0, 0, Math.PI*2);
+    ctx.fillStyle = rgbaStr([ lerp(48,sky.hor[0],0.32), lerp(88,sky.hor[1],0.32), lerp(138,sky.hor[2],0.32) ], 0.62);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(proj.x - screenR*0.15, proj.y - screenR*0.08, screenR*0.5, screenR*0.16, 0, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
+    ctx.fill();
+  }
+
   function drawRiver(hy){
     var pts = [];
     var samples = [ {x:-90,z:60}, {x:-50,z:75}, {x:-10,z:66}, {x:30,z:80}, {x:80,z:70}, {x:130,z:90} ];
@@ -1174,33 +1198,47 @@
 
   function drawBuildings(){
     var faces = TOWER_FACES.concat(CHIMNEY_FACES);
-    AUX_BUILDINGS.forEach(function(b, bi){ faces = faces.concat(buildAuxFaces(b, b.color, bi+1)); });
+    AUX_BUILDINGS.forEach(function(b, bi){
+      // cheap pre-filter: skip generating/testing faces for buildings that are far away
+      // or well behind the camera - saves real work before it ever reaches the sort/draw pass
+      var dx = b.x-cam.pos.x, dz = b.z-cam.pos.z;
+      var dist = Math.hypot(dx, dz);
+      if (dist > 150) return;
+      if (dist > 0.01 && (dx/dist)*cam.forward.x + (dz/dist)*cam.forward.z < -0.3) return;
+      faces = faces.concat(buildAuxFaces(b, b.color, bi+1));
+    });
 
     var visible = [];
     faces.forEach(function(f){
       var toCam = { x: cam.pos.x - f.center.x, y: cam.pos.y - f.center.y, z: cam.pos.z - f.center.z };
       if (dot(f.normal, toCam) <= 0) return;
-      var projected = [];
       var minZ = Infinity, sumZ = 0, behind = 0;
+      var camPts = [];
       f.verts.forEach(function(v){
         var cp = toCamera(v);
+        camPts.push(cp);
         sumZ += cp.z;
         if (cp.z < 0.05) behind++;
         minZ = Math.min(minZ, cp.z);
       });
       if (behind === f.verts.length) return;
       f.avgZ = sumZ / f.verts.length;
+      f.minZ = minZ;
+      f.camPts = camPts;
       visible.push(f);
     });
 
-    visible.sort(function(a,b){ return b.avgZ - a.avgZ; });
+    // sort by each face's NEAREST point rather than its average - a face's average depth
+    // is a poor proxy once shapes are large/elongated (like the tower), and using it as the
+    // sole sort key is what let closer detail (windows) get painted over incorrectly.
+    visible.sort(function(a,b){ return b.minZ - a.minZ; });
 
     visible.forEach(function(f){
       var pts = [];
       var n = f.verts.length;
       for (var i = 0; i < n; i++){
-        var a = toCamera(f.verts[i]);
-        var b = toCamera(f.verts[(i+1)%n]);
+        var a = f.camPts[i];
+        var b = f.camPts[(i+1)%n];
         if (a.z >= 0.05){
           var pa = project(a);
           if (pa) pts.push(pa);
@@ -1348,7 +1386,7 @@
 
   function drawGroundShadow(cx, cz, r, alpha){
     var pts = [];
-    var segN = 22;
+    var segN = 12;
     for (var i = 0; i <= segN; i++){
       var a = (i/segN)*Math.PI*2;
       pts.push({ x: cx + Math.cos(a)*r, y:0.02, z: cz + Math.sin(a)*r });
@@ -1373,6 +1411,7 @@
     drawGroundShadow(TOWER.x, TOWER.z, 7.8, 0.35);
     drawGroundShadow(CHIMNEY.x, CHIMNEY.z, CHIMNEY.baseR+0.8, 0.3);
     AUX_BUILDINGS.forEach(function(b){
+      if (Math.hypot(b.x-cam.pos.x, b.z-cam.pos.z) > 150) return;
       drawGroundShadow(b.x, b.z, Math.max(b.halfW,b.halfD)*1.25, 0.28);
     });
   }
