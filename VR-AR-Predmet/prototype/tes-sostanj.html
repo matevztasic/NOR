@@ -44,6 +44,21 @@
     touch-action:none;
   }
   canvas#scene.dragging{ cursor:grabbing; }
+  canvas#scene.locked{ cursor:none; }
+
+  .crosshair{
+    position:fixed;
+    top:50%; left:50%;
+    width:6px; height:6px;
+    margin:-3px 0 0 -3px;
+    border-radius:50%;
+    background:var(--paper);
+    box-shadow:0 0 0 1px rgba(0,0,0,.5);
+    opacity:0;
+    pointer-events:none;
+    z-index:4;
+  }
+  canvas#scene.locked ~ .crosshair{ opacity:.85; }
 
   body.shake canvas#scene{ animation:vertigo-shake .28s infinite; }
   @keyframes vertigo-shake{
@@ -300,9 +315,10 @@
 </div>
 
 <div class="hint">
-  <kbd>W A S D</kbd> gibanje · klik + vleci za pogled<br>
+  <kbd>W A S D</kbd> gibanje · <span id="lookHint">klikni za prost pogled z miško</span><br>
   Pojdi do stolpa in drži <kbd>W</kbd> za vzpon
 </div>
+<div class="crosshair" id="crosshair"></div>
 
 <button class="icon-btn reset-btn" id="resetBtn">⟲ Ponastavi</button>
 
@@ -432,19 +448,68 @@
   });
   window.addEventListener('keyup', function(e){ keys[e.code] = false; });
 
+  // Primary look control: real FPS-style pointer lock (free mouse look, no held button).
+  // Falls back to click-and-drag if the browser/embed context refuses pointer lock.
+  var pointerLockSupported = 'pointerLockElement' in document;
+  var lockFallback = !pointerLockSupported;
+  var isLocked = false;
+  updateLookHint();
+
+  function isCanvasLocked(){
+    return document.pointerLockElement === canvas || document.mozPointerLockElement === canvas;
+  }
+
+  canvas.addEventListener('click', function(){
+    if (lockFallback || !pointerLockSupported) return;
+    if (!isCanvasLocked()){
+      var req = canvas.requestPointerLock();
+      if (req && typeof req.catch === 'function') req.catch(function(){ lockFallback = true; updateLookHint(); });
+    }
+  });
+
+  document.addEventListener('pointerlockchange', function(){
+    isLocked = isCanvasLocked();
+    canvas.classList.toggle('locked', isLocked);
+    updateLookHint();
+  });
+  document.addEventListener('pointerlockerror', function(){
+    lockFallback = true;
+    updateLookHint();
+  });
+
+  window.addEventListener('mousemove', function(e){
+    if (!isLocked) return;
+    player.yaw += e.movementX * 0.0028;
+    player.pitch = clamp(player.pitch - e.movementY * 0.0028, -1.25, 1.25);
+  });
+
+  // Fallback: click-and-drag look, used only if pointer lock is unavailable/refused.
   var drag = { active:false, lastX:0, lastY:0 };
   canvas.addEventListener('pointerdown', function(e){
+    if (!lockFallback) return;
     drag.active = true; drag.lastX = e.clientX; drag.lastY = e.clientY;
     canvas.classList.add('dragging');
   });
   window.addEventListener('pointerup', function(){ drag.active = false; canvas.classList.remove('dragging'); });
   window.addEventListener('pointermove', function(e){
-    if (!drag.active) return;
+    if (!lockFallback || !drag.active) return;
     var dx = e.clientX - drag.lastX, dy = e.clientY - drag.lastY;
     drag.lastX = e.clientX; drag.lastY = e.clientY;
     player.yaw += dx * 0.0045;
     player.pitch = clamp(player.pitch - dy * 0.0045, -1.25, 1.25);
   });
+
+  function updateLookHint(){
+    var hint = document.getElementById('lookHint');
+    if (!hint) return;
+    if (lockFallback){
+      hint.textContent = 'Klik + vleci za pogled';
+    } else if (isLocked){
+      hint.textContent = 'Esc za izhod iz pogleda';
+    } else {
+      hint.textContent = 'Klikni za prost pogled z miško';
+    }
+  }
 
   resetBtn.addEventListener('click', function(){
     player.x = 0; player.z = WALL_Z - 9; player.groundY = 0;
