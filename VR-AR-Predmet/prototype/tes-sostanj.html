@@ -484,6 +484,23 @@
     { x:22,  z:52, halfW:2.8, halfD:2.8, height:13, color:[88,96,100] },
     { x:-6,  z:56, halfW:1.6, halfD:1.6, height:6,  color:[132,96,64] }
   ];
+  // extra buildings scattered around the complex, kept clear of the tower and chimney
+  (function addMoreBuildings(){
+    for (var i = 0; i < 10; i++){
+      var seed = 200 + i*4.3;
+      var ang = pseudoRandom(seed) * Math.PI*2;
+      var dist = 26 + pseudoRandom(seed+1) * 62;
+      var bx = TOWER.x + Math.cos(ang)*dist;
+      var bz = TOWER.z + Math.sin(ang)*dist;
+      if (Math.hypot(bx-36, bz-40) < 9) continue; // keep clear of the chimney
+      var hw = 1.6 + pseudoRandom(seed+2)*3.2;
+      var hd = 1.6 + pseudoRandom(seed+3)*3.2;
+      var h = 5 + pseudoRandom(seed+4)*14;
+      var toneSeed = pseudoRandom(seed+5);
+      var color = toneSeed < 0.33 ? [92,84,76] : (toneSeed < 0.66 ? [78,90,100] : [110,78,56]);
+      AUX_BUILDINGS.push({ x:bx, z:bz, halfW:hw, halfD:hd, height:h, color:color });
+    }
+  })();
 
   // power line pylons, receding toward the horizon for context/scale
   var PYLONS = [];
@@ -536,9 +553,19 @@
       var tx = (pseudoRandom(seed) - 0.5) * 150;
       var tz = 8 + pseudoRandom(seed+1) * 140;
       if (Math.hypot(tx-TOWER.x, tz-TOWER.z) < 13) continue;
-      TREES.push({ x:tx, z:tz, h: 3.2+pseudoRandom(seed+2)*2.6, w: 1.5+pseudoRandom(seed+3)*1.1 });
+      TREES.push({ x:tx, z:tz, h: 3.2+pseudoRandom(seed+2)*2.6 });
+    }
+    // a proper forest patch off to one side, for a less "bare" surroundings
+    for (var j = 0; j < 34; j++){
+      var fseed = 400 + j*2.87;
+      var fx = -58 + pseudoRandom(fseed)*40;
+      var fz = 62 + pseudoRandom(fseed+1)*56;
+      if (Math.hypot(fx-TOWER.x, fz-TOWER.z) < 13) continue;
+      TREES.push({ x:fx, z:fz, h: 2.8+pseudoRandom(fseed+2)*3.2 });
     }
   })();
+
+  var ROAD_SAMPLES = [ {x:-1,z:-6}, {x:1,z:16}, {x:6,z:44}, {x:11,z:76}, {x:16,z:118} ];
 
   var HOLDS = [];
   (function buildHolds(){
@@ -796,6 +823,73 @@
   }
 
   // ---------------- rendering ----------------
+
+  // Expensive blurred shapes (clouds, smoke, glow) are painted ONCE onto small offscreen
+  // canvases here at load time, then reused every frame via cheap drawImage() calls -
+  // recomputing a live blur filter per shape per frame was the main cause of stutter.
+  function makeSprite(size, drawFn){
+    var c = document.createElement('canvas');
+    c.width = size; c.height = size;
+    var octx = c.getContext('2d');
+    drawFn(octx, size);
+    return c;
+  }
+
+  var CLOUD_SPRITE = makeSprite(200, function(octx, s){
+    if (typeof octx.filter === 'string') octx.filter = 'blur(9px)';
+    octx.fillStyle = '#ffffff';
+    var cx = s/2, cy = s/2;
+    var blobs = [ [0,0,1], [0.55,-0.12,0.78], [-0.55,-0.06,0.72], [0.95,0.05,0.55], [-0.95,0.08,0.5], [0.15,0.16,0.7], [-0.2,-0.2,0.6] ];
+    blobs.forEach(function(b){
+      var r = 22*b[2];
+      octx.beginPath();
+      octx.ellipse(cx+b[0]*38, cy+b[1]*26, r*1.55, r*0.85, 0, 0, Math.PI*2);
+      octx.fill();
+    });
+  });
+
+  var CIRRUS_SPRITE = (function(){
+    // deliberately non-square (matches its own aspect ratio) so scaling it whole via
+    // drawImage doesn't squash the streak into an invisible sliver
+    var c = document.createElement('canvas');
+    c.width = 200; c.height = 40;
+    var octx = c.getContext('2d');
+    if (typeof octx.filter === 'string') octx.filter = 'blur(5px)';
+    octx.fillStyle = '#fffaf0';
+    octx.beginPath();
+    octx.ellipse(100, 20, 86, 13, 0, 0, Math.PI*2);
+    octx.fill();
+    return c;
+  })();
+
+  var SMOKE_SPRITE = makeSprite(90, function(octx, s){
+    if (typeof octx.filter === 'string') octx.filter = 'blur(6px)';
+    octx.fillStyle = '#e6e6ea';
+    octx.beginPath();
+    octx.ellipse(s/2, s/2, s*0.32, s*0.26, 0, 0, Math.PI*2);
+    octx.fill();
+  });
+
+  var SUN_GLOW_SPRITE = makeSprite(340, function(octx, s){
+    var r = s/2;
+    var g = octx.createRadialGradient(r, r, 0, r, r, r);
+    g.addColorStop(0, 'rgba(255,241,208,0.62)');
+    g.addColorStop(0.35, 'rgba(255,236,195,0.22)');
+    g.addColorStop(1, 'rgba(255,236,195,0)');
+    octx.fillStyle = g;
+    octx.fillRect(0, 0, s, s);
+  });
+
+  var TREE_SPRITE = makeSprite(64, function(octx, s){
+    octx.fillStyle = '#4a3324';
+    octx.fillRect(s*0.46, s*0.62, s*0.08, s*0.3);
+    octx.fillStyle = '#3a5c37';
+    octx.beginPath(); octx.ellipse(s*0.5, s*0.4, s*0.3, s*0.26, 0, 0, Math.PI*2); octx.fill();
+    octx.fillStyle = '#466a41';
+    octx.beginPath(); octx.ellipse(s*0.32, s*0.5, s*0.2, s*0.18, 0, 0, Math.PI*2); octx.fill();
+    octx.beginPath(); octx.ellipse(s*0.68, s*0.5, s*0.2, s*0.18, 0, 0, Math.PI*2); octx.fill();
+  });
+
   var SKY_LOW = { top:[70,98,150], hor:[255,167,120] };
   var SKY_HIGH = { top:[52,128,208], hor:[255,236,204] };
 
@@ -838,22 +932,12 @@
     ctx.fillStyle = groundGrad;
     ctx.fillRect(0, Math.max(hy,0), W, H - Math.max(hy,0));
 
-    // sun (true 3D point far away) with layered soft glow
+    // sun (true 3D point far away) - pre-rendered glow sprite + a plain solid disc
     var sunCam = toCamera(SUN_WORLD);
     var sunP = project(sunCam);
     if (sunP){
-      var outerGlow = ctx.createRadialGradient(sunP.x, sunP.y, 0, sunP.x, sunP.y, 260);
-      outerGlow.addColorStop(0, 'rgba(255,228,175,0.30)');
-      outerGlow.addColorStop(1, 'rgba(255,228,175,0)');
-      ctx.fillStyle = outerGlow;
-      ctx.fillRect(sunP.x-260, sunP.y-260, 520, 520);
-
-      var glow = ctx.createRadialGradient(sunP.x, sunP.y, 0, sunP.x, sunP.y, 150);
-      glow.addColorStop(0, 'rgba(255,241,208,0.62)');
-      glow.addColorStop(1, 'rgba(255,241,208,0)');
-      ctx.fillStyle = glow;
-      ctx.fillRect(sunP.x-150, sunP.y-150, 300, 300);
-
+      var gs = 340;
+      ctx.drawImage(SUN_GLOW_SPRITE, sunP.x-gs/2, sunP.y-gs/2, gs, gs);
       ctx.beginPath();
       ctx.arc(sunP.x, sunP.y, 38, 0, Math.PI*2);
       ctx.fillStyle = 'rgba(255,251,235,0.97)';
@@ -905,17 +989,6 @@
     }
   })();
 
-  function drawCloudCluster(cx, cy, scale, alpha){
-    ctx.fillStyle = 'rgba(255,255,255,' + alpha + ')';
-    var blobs = [ [0,0,1], [0.55,-0.12,0.78], [-0.55,-0.06,0.72], [0.95,0.05,0.55], [-0.95,0.08,0.5], [0.15,0.16,0.7], [-0.2,-0.2,0.6] ];
-    blobs.forEach(function(b){
-      var r = 24*scale*b[2];
-      ctx.beginPath();
-      ctx.ellipse(cx+b[0]*42*scale, cy+b[1]*30*scale, r*1.55, r*0.85, 0, 0, Math.PI*2);
-      ctx.fill();
-    });
-  }
-
   function wrapX(raw){
     return ((raw % CLOUD_WRAP) + CLOUD_WRAP) % CLOUD_WRAP - CLOUD_WRAP/2 + W/2;
   }
@@ -924,42 +997,34 @@
     var t = clamp(player.groundY / TOWER.height, 0, 1);
     var offset = -(player.yaw * 160);
 
-    // thin high cirrus streaks - always present, subtle, slow parallax
-    ctx.save();
-    if (typeof ctx.filter === 'string') ctx.filter = 'blur(4px)';
+    // thin high cirrus streaks - pre-rendered sprite, just positioned/scaled/faded per frame
     CIRRUS.forEach(function(c){
       var sx = wrapX(c.x + offset*c.parallax);
       if (sx < -c.len-40 || sx > W+c.len+40) return;
-      ctx.fillStyle = 'rgba(255,250,240,' + c.alpha + ')';
-      ctx.beginPath();
-      ctx.ellipse(sx, hy - c.y, c.len, 7, 0, 0, Math.PI*2);
-      ctx.fill();
+      var w = c.len*2, h = w*0.2;
+      ctx.globalAlpha = c.alpha;
+      ctx.drawImage(CIRRUS_SPRITE, sx-w/2, hy-c.y-h/2, w, h);
     });
-    ctx.restore();
+    ctx.globalAlpha = 1;
 
-    // puffy mid-sky clouds, denser and more numerous, cover a wide spread of the sky
-    ctx.save();
-    if (typeof ctx.filter === 'string') ctx.filter = 'blur(10px)';
+    // puffy mid-sky clouds - same pre-rendered sprite, drawn many times (cheap)
     CLOUD_PUFFS.forEach(function(c){
       var sx = wrapX(c.x + offset*c.parallax);
       if (sx < -150 || sx > W+150) return;
       var alpha = c.alpha * clamp(0.7 + t*0.4, 0, 1);
-      drawCloudCluster(sx, hy - c.y, c.scale, alpha);
+      var sz = 170 * c.scale;
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(CLOUD_SPRITE, sx-sz/2, hy-c.y-sz/2, sz, sz);
     });
-    ctx.restore();
-
-    // soft sunbeams radiating from the sun disc through the cloud layer
-    drawSunbeams(hy);
+    ctx.globalAlpha = 1;
 
     // cloud sea near the horizon, thickens dramatically as the climb progresses ("above the clouds")
     if (t > 0.28){
       var seaAlpha = clamp((t-0.28)/0.5, 0, 1) * 0.94;
-      ctx.save();
-      if (typeof ctx.filter === 'string') ctx.filter = 'blur(7px)';
       ctx.fillStyle = 'rgba(255,255,255,' + seaAlpha + ')';
       ctx.beginPath();
       ctx.moveTo(-40, hy+34);
-      for (var x = -40; x <= W+40; x += 36){
+      for (var x = -40; x <= W+40; x += 44){
         var yy = hy + 34 + 12*Math.sin((x+offset*0.3)*0.011) + 7*Math.sin((x+offset*0.5)*0.024);
         ctx.lineTo(x, yy);
       }
@@ -967,35 +1032,7 @@
       ctx.lineTo(-40, hy+130);
       ctx.closePath();
       ctx.fill();
-      ctx.restore();
     }
-  }
-
-  function drawSunbeams(hy){
-    var sunCam = toCamera(SUN_WORLD);
-    var sunP = project(sunCam);
-    if (!sunP || sunP.y > hy + 60) return;
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    var beamCount = 5;
-    for (var i = 0; i < beamCount; i++){
-      var ang = -0.5 + (i/(beamCount-1))*1.0;
-      var len = H*0.9;
-      var spread = 0.05 + i%2*0.02;
-      var x1 = sunP.x + Math.sin(ang-spread)*len, y1 = sunP.y + Math.cos(ang-spread)*len*0.6 + len*0.3;
-      var x2 = sunP.x + Math.sin(ang+spread)*len, y2 = sunP.y + Math.cos(ang+spread)*len*0.6 + len*0.3;
-      ctx.beginPath();
-      ctx.moveTo(sunP.x, sunP.y);
-      ctx.lineTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.closePath();
-      var beamGrad = ctx.createRadialGradient(sunP.x, sunP.y, 0, sunP.x, sunP.y, len);
-      beamGrad.addColorStop(0, 'rgba(255,244,214,0.10)');
-      beamGrad.addColorStop(1, 'rgba(255,244,214,0)');
-      ctx.fillStyle = beamGrad;
-      ctx.fill();
-    }
-    ctx.restore();
   }
 
   function drawHillLayer(offset, hy, amp1, amp2){
@@ -1064,6 +1101,47 @@
     var sky = skyColors();
     ctx.fillStyle = rgbaStr([ lerp(60,sky.hor[0],0.4), lerp(90,sky.hor[1],0.4), lerp(130,sky.hor[2],0.4) ], 0.55);
     ctx.fill();
+  }
+
+  function drawRoad(){
+    var widthHalf = 3;
+    var top = [], bottom = [];
+    for (var i = 0; i < ROAD_SAMPLES.length; i++){
+      var s = ROAD_SAMPLES[i];
+      var prev = ROAD_SAMPLES[Math.max(0,i-1)], next = ROAD_SAMPLES[Math.min(ROAD_SAMPLES.length-1,i+1)];
+      var dx = next.x-prev.x, dz = next.z-prev.z;
+      var len = Math.hypot(dx,dz) || 1;
+      var px = -dz/len*widthHalf, pz = dx/len*widthHalf;
+      var a = toCamera({x:s.x+px, y:0.03, z:s.z+pz});
+      var b = toCamera({x:s.x-px, y:0.03, z:s.z-pz});
+      if (a.z < 1 || b.z < 1) continue;
+      var pa = project(a), pb = project(b);
+      if (pa) top.push(pa);
+      if (pb) bottom.push(pb);
+    }
+    if (top.length < 2) return;
+    ctx.beginPath();
+    ctx.moveTo(top[0].x, top[0].y);
+    for (var i2 = 1; i2 < top.length; i2++) ctx.lineTo(top[i2].x, top[i2].y);
+    for (var j2 = bottom.length-1; j2 >= 0; j2--) ctx.lineTo(bottom[j2].x, bottom[j2].y);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(56,56,58,0.88)';
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(228,218,178,0.55)';
+    ctx.setLineDash([2,3]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    var first = true;
+    ROAD_SAMPLES.forEach(function(s){
+      var cp = toCamera({x:s.x, y:0.05, z:s.z});
+      if (cp.z < 1) return;
+      var p = project(cp);
+      if (!p) return;
+      if (first){ ctx.moveTo(p.x, p.y); first = false; } else ctx.lineTo(p.x, p.y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
   function drawGrid(){
@@ -1320,29 +1398,15 @@
   }
 
   function drawTrees(){
-    var sky = skyColors();
     TREES.forEach(function(t){
       var cpBase = toCamera({x:t.x, y:0, z:t.z});
-      if (cpBase.z < 1) return;
+      if (cpBase.z < 1 || cpBase.z > 110) return;
       var baseP = project(cpBase);
       var topP = project(toCamera({x:t.x, y:t.h, z:t.z}));
       if (!baseP || !topP) return;
-      var screenH = Math.abs(baseP.y - topP.y);
-      if (screenH < 3 || screenH > H*1.2) return;
-      var screenW = screenH * 0.6;
-      var fog = clamp(cpBase.z / 140, 0, 1);
-
-      var trunk = [ lerp(58,sky.hor[0],fog*0.7), lerp(42,sky.hor[1],fog*0.7), lerp(30,sky.hor[2],fog*0.7) ];
-      ctx.fillStyle = rgbaStr(trunk, 1);
-      var trunkW = Math.max(1, screenW*0.12);
-      ctx.fillRect(baseP.x - trunkW/2, baseP.y - screenH*0.35, trunkW, screenH*0.35);
-
-      var foliage = [ lerp(44,sky.hor[0],fog*0.7), lerp(76,sky.hor[1],fog*0.7), lerp(42,sky.hor[2],fog*0.7) ];
-      ctx.fillStyle = rgbaStr(foliage, 1);
-      var cy = baseP.y - screenH*0.62;
-      ctx.beginPath(); ctx.ellipse(baseP.x, cy, screenW*0.55, screenH*0.42, 0, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(baseP.x - screenW*0.34, cy + screenH*0.09, screenW*0.4, screenH*0.32, 0, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(baseP.x + screenW*0.34, cy + screenH*0.09, screenW*0.4, screenH*0.32, 0, 0, Math.PI*2); ctx.fill();
+      var screenH = Math.abs(baseP.y - topP.y) * 1.7;
+      if (screenH < 4 || screenH > H*1.2) return;
+      ctx.drawImage(TREE_SPRITE, baseP.x-screenH/2, baseP.y-screenH, screenH, screenH);
     });
   }
 
@@ -1355,20 +1419,16 @@
     var dist = Math.hypot(cp.x, cp.y, cp.z);
     var scale = clamp(320/dist, 0.12, 3);
     var now = ts * 0.001;
-    ctx.save();
-    if (typeof ctx.filter === 'string') ctx.filter = 'blur(5px)';
     for (var i = 0; i < 5; i++){
       var age = ((now*0.12 + i/5) % 1);
       var rise = age * 100 * scale;
       var drift = Math.sin(now*0.5 + i*1.7) * 12 * scale * age;
       var alpha = (1-age) * 0.45;
-      var r = (7 + age*24) * scale;
-      ctx.beginPath();
-      ctx.ellipse(p.x + drift, p.y - rise, r, r*0.8, 0, 0, Math.PI*2);
-      ctx.fillStyle = 'rgba(230,230,234,' + alpha + ')';
-      ctx.fill();
+      var sz = (16 + age*52) * scale;
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(SMOKE_SPRITE, p.x+drift-sz/2, p.y-rise-sz/2, sz, sz);
     }
-    ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   function drawVertigoOverlay(){
@@ -1398,8 +1458,8 @@
     updateCamera();
 
     drawSkyGround();
-    drawGrid();
     drawContactShadow();
+    drawRoad();
     drawPylons();
     drawTrees();
     drawBuildings();
