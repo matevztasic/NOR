@@ -1315,7 +1315,7 @@
     if (widthLen < 2.5 || heightLen < 2) return;
 
     var centerCam = toCamera(f.center);
-    if (centerCam.z < 1.5 || centerCam.z > 65) return;
+    if (centerCam.z < 3 || centerCam.z > 65) return;
 
     var cols = clamp(Math.round(widthLen/2.6), 2, 4);
     var rows = clamp(Math.round(heightLen/3), 2, 3);
@@ -1331,14 +1331,23 @@
           lerpVec(w0, uVec, u-wu, vVec, v+wv)
         ];
         var pts = [], ok = true;
+        var minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
         for (var k = 0; k < 4; k++){
           var cp = toCamera(corners[k]);
-          if (cp.z < 0.1){ ok = false; break; }
+          // a corner too close to the camera makes the perspective divide explode into a
+          // huge shape (this is what was rendering as giant windows floating off the wall) -
+          // well clear of the near plane is required, not just "in front of it"
+          if (cp.z < 3){ ok = false; break; }
           var pr = project(cp);
           if (!pr){ ok = false; break; }
           pts.push(pr);
+          if (pr.x<minX) minX=pr.x; if (pr.x>maxX) maxX=pr.x;
+          if (pr.y<minY) minY=pr.y; if (pr.y>maxY) maxY=pr.y;
         }
         if (!ok) continue;
+        // belt-and-suspenders sanity cap: no single window should ever cover a huge chunk
+        // of the screen - if it does, something projected wrong, so skip it rather than show it
+        if (maxX-minX > 180 || maxY-minY > 180) continue;
 
         var lit = pseudoRandom(f.seed + r*13 + c*3) > 0.6;
         ctx.beginPath();
@@ -1392,13 +1401,18 @@
       pts.push({ x: cx + Math.cos(a)*r, y:0.02, z: cz + Math.sin(a)*r });
     }
     var proj = [];
+    var minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
     pts.forEach(function(p){
       var cp = toCamera(p);
-      if (cp.z < 0.05) return;
+      if (cp.z < 2) return; // stay well clear of the near plane - see drawWindowsOnFace
       var pr = project(cp);
-      if (pr) proj.push(pr);
+      if (!pr) return;
+      proj.push(pr);
+      if (pr.x<minX) minX=pr.x; if (pr.x>maxX) maxX=pr.x;
+      if (pr.y<minY) minY=pr.y; if (pr.y>maxY) maxY=pr.y;
     });
     if (proj.length < 3) return;
+    if (maxX-minX > W*3 || maxY-minY > H*3) return;
     ctx.beginPath();
     ctx.moveTo(proj[0].x, proj[0].y);
     for (var j = 1; j < proj.length; j++) ctx.lineTo(proj[j].x, proj[j].y);
