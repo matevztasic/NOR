@@ -13,7 +13,7 @@ Ta mapa je namenjena končni, delujoči različici VR aplikacije, oddani ob zakl
 ## Struktura oddaje
 ```
 final-app/
- ├─ index.html             (dopolnjena WebXR aplikacija, glej strukturo iz /prototype/)
+ ├─ tes-sostanj.html       (dopolnjena WebXR aplikacija, glej strukturo iz /prototype/)
  └─ demo/                  (posnetek zaslona/videa demonstracije delovanja, npr. demo.mp4 ali povezava)
 ```
 
