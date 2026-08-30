@@ -1,11 +1,13 @@
 # Prototip – Vzpon: Zgodba Šoštanjske elektrarne
 
-Ta mapa je namenjena delujočemu VR prototipu (MVP), ki dokaže osrednjo mehaniko aplikacije iz `/vaja-01/` (ideja), `/vaja-02/` (scene) in `/vaja-03/` (tehnična zasnova). Prava vsebina Unreal Engine projekta (`.uproject`, `.uasset`, blueprinti, mape) nastane šele v UE Editorju – ta dokument je načrt/ogrodje, po katerem se razvoj izvede.
+Mapa `VzponTES/` vsebuje **pravo Unreal Engine C++ ogrodje** (ne le načrt): `.uproject`, gradbene datoteke in 4 delujoče C++ razrede, ki implementirajo jedrno mehaniko iz `/vaja-01/` (ideja) in `/vaja-02/` (scene):
 
-## Kako dobiti Unreal Engine
-1. Prenesi in namesti **Epic Games Launcher**: https://store.epicgames.com/download (potreben brezplačen Epic Games račun).
-2. V launcherju odpri zavihek **Unreal Engine → Library** in klikni **+** za namestitev najnovejše LTS različice (priporočeno UE 5.4 ali novejša).
-3. Po namestitvi v launcherju izberi **Games → New Project → Virtual Reality template** (ali *Blank* + dodaš OpenXR/Meta XR plugin), poimenuj projekt npr. `VzponTES` in ga ustvari **znotraj te mape** (`/prototype/`), da bo `.uproject` del repozitorija.
+- `AVzponClimbingCharacter` – VR igralec s plezalno mehaniko (Source/VzponTES/ClimbingCharacter.h/.cpp)
+- `AClimbHold` – oprijem na steni (ClimbHold.h/.cpp)
+- `AHistoryInfoPanel` – zgodovinska info-točka (HistoryInfoPanel.h/.cpp)
+- `AVertigoZone` – učinek vrtoglavice na vrhu (VertigoZone.h/.cpp)
+
+**To kodo je treba enkrat postaviti v Unreal Editorju** (namestitev meshov/materialov/zvokov, Blueprint podrazredi, Enhanced Input assetje) – to je ročno grafično delo, ki ga ni mogoče avtomatizirati. Natančna navodila korak-za-korak so v [`VzponTES/SETUP.md`](VzponTES/SETUP.md).
 
 ## Cilj prototipa (MVP)
 Prototip mora dokazati tri jedrne mehanike iz zasnove, ne še celotne aplikacije:
@@ -13,25 +15,25 @@ Prototip mora dokazati tri jedrne mehanike iz zasnove, ne še celotne aplikacije
 2. **Ena zgodovinska info-točka** – ob približevanju/pogledu na označeno mesto se prikaže plavajoča tabla z besedilom/sliko (glej Scena 2 v `/vaja-02/scenes.md`).
 3. **Prihod na vrh + učinek višine** – uporabnik doseže ploščad, lahko po njej hodi, sproži se vizualni/zvočni efekt vrtoglavice (glej Scena 3).
 
-## Načrtovana struktura UE projekta
+## Struktura UE projekta
 ```
 prototype/
- └─ VzponTES/                     (Unreal Engine .uproject)
+ └─ VzponTES/
      ├─ VzponTES.uproject
+     ├─ SETUP.md                       (navodila za namestitev in zagon)
      ├─ Config/
-     ├─ Content/
-     │   ├─ Maps/
-     │   │   └─ TowerPrototype.umap
-     │   ├─ Blueprints/
-     │   │   ├─ BP_ClimbHold.uasset        (posamezen oprijem, zazna prijem roke)
-     │   │   ├─ BP_ClimbingCharacter.uasset (plezalna gibalna logika)
-     │   │   ├─ BP_HistoryInfoPanel.uasset  (prikaz zgodovinske vsebine)
-     │   │   ├─ BP_TopPlatform.uasset       (ploščad + trigger za vrtoglavico)
-     │   │   └─ BP_VertigoEffect.uasset     (post-process učinek višine)
-     │   ├─ Meshes/         (dimnik/stolp, oprijemi, ploščad – lahko iz Quixel/Marketplace)
-     │   ├─ Materials/      (beton, kovina, nebo)
-     │   └─ UI/             (HUD napredka, opozorilo o višini)
-     └─ Source/             (če se doda C++ logika, sicer samo Blueprinti)
+     │   ├─ DefaultEngine.ini
+     │   └─ DefaultGame.ini
+     ├─ Source/
+     │   ├─ VzponTES.Target.cs
+     │   ├─ VzponTESEditor.Target.cs
+     │   └─ VzponTES/
+     │       ├─ VzponTES.Build.cs
+     │       ├─ ClimbingCharacter.h/.cpp    (plezalna mehanika)
+     │       ├─ ClimbHold.h/.cpp            (oprijem na steni)
+     │       ├─ HistoryInfoPanel.h/.cpp     (zgodovinska info-točka)
+     │       └─ VertigoZone.h/.cpp          (učinek vrtoglavice na vrhu)
+     └─ Content/                       (nastane v Editorju: nivo, Blueprinti, meshi, materiali, UMG)
 ```
 
 ## Mejniki razvoja
