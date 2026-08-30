@@ -13,18 +13,15 @@ Ta mapa je namenjena končni, delujoči različici VR aplikacije, oddani ob zakl
 ## Struktura oddaje
 ```
 final-app/
- ├─ VzponTES/              (kompleten Unreal Engine .uproject, glej strukturo iz /prototype/)
- ├─ Builds/                (izvožen .apk build za Meta Quest, ni nujno v Gitu zaradi velikosti - glej opombo spodaj)
+ ├─ index.html             (dopolnjena WebXR aplikacija, glej strukturo iz /prototype/)
  └─ demo/                  (posnetek zaslona/videa demonstracije delovanja, npr. demo.mp4 ali povezava)
 ```
-
-> Opomba: velike binarne datoteke (izvoženi `.apk`, video posnetki) naj se, če presegajo GitHub omejitve, povežejo prek zunanje povezave (npr. Google Drive) v tem README-ju, namesto da se commitajo neposredno.
 
 ## Kriteriji za končno predstavitev (iz navodil predmeta)
 Pri predstavitvi je treba pokazati:
 1. problem oziroma primer uporabe (dostopnost visokih industrijskih objektov + izobraževanje o zgodovini TEŠ),
 2. VR rešitev in ključne funkcionalnosti (plezanje, zgodovinske točke, vrh + vrtoglavica),
-3. uporabljene tehnologije (Unreal Engine, Meta Quest, OpenXR),
+3. uporabljene tehnologije (WebXR, Meta Quest brskalnik),
 4. delujočo demonstracijo aplikacije v živo ali prek posnetka,
 5. dodano vrednost rešitve (varno doživetje sicer nedostopnega prostora + izobraževalna vsebina + morebitna uporaba pri izpostavljenosti strahu pred višino).
 

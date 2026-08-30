@@ -1,0 +1,811 @@
+<!doctype html>
+<html lang="sl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vzpon</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#14181d;
+    --surface:#1b2127;
+    --surface-2:#232b32;
+    --line:#323c44;
+    --mist:#9aa7ae;
+    --paper:#eef1f0;
+    --ember:#ff7a3d;
+    --ember-deep:#d85f28;
+    --dusk:#5b86b8;
+    --danger:#ff5f5f;
+    --font-display:'Big Shoulders Display', 'Arial Narrow', sans-serif;
+    --font-body:'IBM Plex Sans', system-ui, sans-serif;
+    --font-mono:'IBM Plex Mono', ui-monospace, monospace;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    background:var(--ink);
+    color:var(--paper);
+    font-family:var(--font-body);
+    overflow:hidden;
+  }
+
+  canvas#scene{
+    position:fixed;
+    inset:0;
+    width:100%;
+    height:100%;
+    display:block;
+    cursor:grab;
+    touch-action:none;
+  }
+  canvas#scene.dragging{ cursor:grabbing; }
+
+  body.shake canvas#scene{ animation:vertigo-shake .28s infinite; }
+  @keyframes vertigo-shake{
+    0%{ transform:translate(0,0); }
+    25%{ transform:translate(2px,1px); }
+    50%{ transform:translate(-1.5px,2px); }
+    75%{ transform:translate(-2px,-1.5px); }
+    100%{ transform:translate(0,0); }
+  }
+  @media (prefers-reduced-motion: reduce){
+    body.shake canvas#scene{ animation:none; }
+  }
+
+  button{
+    font-family:var(--font-body);
+    font-weight:600;
+    border:none;
+    cursor:pointer;
+  }
+  button:focus-visible{ outline:2px solid var(--ember); outline-offset:2px; }
+
+  /* ---------- top HUD ---------- */
+  .hud-top{
+    position:fixed;
+    top:16px; left:16px; right:16px;
+    display:flex;
+    align-items:center;
+    gap:16px;
+    z-index:5;
+  }
+  .brand{
+    font-family:var(--font-display);
+    font-weight:800;
+    font-size:1.15rem;
+    letter-spacing:.01em;
+    color:var(--paper);
+    text-shadow:0 2px 10px rgba(0,0,0,.6);
+    white-space:nowrap;
+  }
+  .hud-readout{
+    display:flex;
+    align-items:baseline;
+    gap:5px;
+    font-family:var(--font-mono);
+    font-variant-numeric:tabular-nums;
+    background:rgba(20,24,29,.72);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:8px 12px;
+    backdrop-filter:blur(4px);
+  }
+  .hud-readout .label{
+    font-family:var(--font-body);
+    font-size:.68rem;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--mist);
+    margin-right:2px;
+  }
+  .hud-readout .value{ font-size:1.15rem; font-weight:600; color:var(--paper); }
+  .hud-readout .unit{ font-size:.8rem; color:var(--mist); }
+
+  .hud-progress{
+    flex:1;
+    max-width:260px;
+    height:7px;
+    border-radius:5px;
+    background:rgba(20,24,29,.72);
+    border:1px solid var(--line);
+    overflow:hidden;
+  }
+  .hud-progress-fill{
+    height:100%;
+    width:0%;
+    background:linear-gradient(90deg, var(--dusk), var(--ember));
+    transition:width .08s linear;
+  }
+
+  .icon-btn{
+    background:rgba(20,24,29,.72);
+    border:1px solid var(--line);
+    color:var(--paper);
+    padding:9px 16px;
+    border-radius:999px;
+    font-size:.82rem;
+    backdrop-filter:blur(4px);
+    white-space:nowrap;
+  }
+  .icon-btn:hover{ border-color:var(--ember); }
+
+  /* ---------- control hint ---------- */
+  .hint{
+    position:fixed;
+    left:16px; bottom:16px;
+    z-index:5;
+    font-size:.8rem;
+    color:var(--mist);
+    background:rgba(20,24,29,.72);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:10px 14px;
+    backdrop-filter:blur(4px);
+    max-width:280px;
+  }
+  .hint kbd{
+    font-family:var(--font-mono);
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:1px 6px;
+    font-size:.74rem;
+    color:var(--paper);
+  }
+
+  .reset-btn{
+    position:fixed;
+    right:16px; bottom:16px;
+    z-index:5;
+  }
+
+  /* ---------- history info card ---------- */
+  .info-card{
+    position:fixed;
+    right:16px;
+    top:74px;
+    width:min(300px, 80vw);
+    z-index:6;
+    background:rgba(20,24,29,.92);
+    border:1px solid var(--line);
+    border-left:3px solid var(--ember);
+    border-radius:8px;
+    padding:14px 16px;
+    opacity:0;
+    transform:translateY(-8px);
+    pointer-events:none;
+    transition:opacity .25s ease, transform .25s ease;
+    backdrop-filter:blur(4px);
+  }
+  .info-card.visible{ opacity:1; transform:translateY(0); }
+  .info-card .year{ font-family:var(--font-mono); color:var(--ember); font-size:.78rem; letter-spacing:.04em; }
+  .info-card h3{ font-family:var(--font-display); font-weight:700; font-size:1.3rem; margin:2px 0 6px; line-height:1; }
+  .info-card p{ margin:0; font-size:.84rem; color:var(--mist); }
+
+  /* ---------- vertigo warning ---------- */
+  .vertigo-warning{
+    position:fixed;
+    top:74px; left:50%;
+    transform:translateX(-50%) translateY(-8px);
+    z-index:6;
+    font-family:var(--font-mono);
+    font-size:.85rem;
+    color:var(--danger);
+    background:rgba(20,24,29,.85);
+    border:1px solid var(--danger);
+    border-radius:8px;
+    padding:8px 16px;
+    opacity:0;
+    transition:opacity .2s ease, transform .2s ease;
+  }
+  .vertigo-warning.visible{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  /* ---------- info panel (pitch content) ---------- */
+  .info-panel{
+    position:fixed;
+    inset:0 0 0 auto;
+    width:min(420px, 92vw);
+    background:rgba(19,23,28,.97);
+    border-left:1px solid var(--line);
+    z-index:20;
+    padding:28px 26px 40px;
+    overflow-y:auto;
+    transform:translateX(100%);
+    transition:transform .3s ease;
+  }
+  .info-panel.open{ transform:translateX(0); }
+  .info-panel .close-btn{
+    position:absolute;
+    top:20px; right:20px;
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--paper);
+    width:34px; height:34px;
+    border-radius:50%;
+    font-size:1rem;
+    line-height:1;
+  }
+  .info-panel .close-btn:hover{ border-color:var(--ember); }
+  .info-panel h2{
+    font-family:var(--font-display);
+    font-weight:800;
+    font-size:2rem;
+    line-height:.95;
+    margin:6px 40px 6px 0;
+    text-wrap:balance;
+  }
+  .info-panel .sub{
+    color:var(--mist);
+    font-size:.92rem;
+    margin:0 0 26px;
+  }
+  .info-panel section{ margin-bottom:24px; }
+  .info-panel .eyebrow{
+    font-weight:600;
+    font-size:.72rem;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--ember);
+    margin:0 0 8px;
+  }
+  .info-panel h3{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:1.35rem;
+    margin:0 0 8px;
+  }
+  .info-panel p{ margin:0; font-size:.9rem; color:var(--mist); }
+  .info-panel ul{ margin:0; padding-left:1.1em; font-size:.9rem; color:var(--mist); }
+  .info-panel li + li{ margin-top:5px; }
+  .tech-row{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .tech-pill{
+    font-family:var(--font-mono);
+    font-size:.75rem;
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    color:var(--paper);
+    padding:5px 11px;
+    border-radius:999px;
+  }
+  .overlay-backdrop{
+    position:fixed; inset:0; background:rgba(0,0,0,.35);
+    opacity:0; pointer-events:none; transition:opacity .3s ease; z-index:19;
+  }
+  .overlay-backdrop.open{ opacity:1; pointer-events:auto; }
+
+  @media (max-width: 640px){
+    .brand{ display:none; }
+    .hint{ max-width:220px; font-size:.74rem; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<div class="hud-top">
+  <span class="brand">Vzpon</span>
+  <div class="hud-readout">
+    <span class="label">Višina</span>
+    <span class="value" id="heightVal">0</span>
+    <span class="unit">m</span>
+  </div>
+  <div class="hud-progress"><div class="hud-progress-fill" id="progressFill"></div></div>
+  <button class="icon-btn" id="infoToggle">O aplikaciji</button>
+</div>
+
+<div class="hint">
+  <kbd>W A S D</kbd> gibanje · klik + vleci za pogled<br>
+  Pojdi do stolpa in drži <kbd>W</kbd> za vzpon
+</div>
+
+<button class="icon-btn reset-btn" id="resetBtn">⟲ Ponastavi</button>
+
+<div class="info-card" id="infoCard">
+  <div class="year" id="infoYear">1955</div>
+  <h3 id="infoTitle">Začetek gradnje</h3>
+  <p id="infoText">Postavitev prve enote elektrarne v Šaleški dolini.</p>
+</div>
+
+<div class="vertigo-warning" id="vertigoWarning">⚠ Previdno — visoko nad tlemi</div>
+
+<div class="overlay-backdrop" id="backdrop"></div>
+<div class="info-panel" id="infoPanel">
+  <button class="close-btn" id="closeInfo" aria-label="Zapri">✕</button>
+  <h2>Vzpon: Zgodba Šoštanjske elektrarne</h2>
+  <p class="sub">VR/AR projekt · trenutna razvojna različica teče v brskalniku</p>
+
+  <section>
+    <p class="eyebrow">Problem</p>
+    <h3>Nedostopna višina, neopisana zgodovina</h3>
+    <p>Hladilni stolp in dimnik TEŠ sta iz varnostnih razlogov zaprta za javnost, fizičen vzpon pa je za večino telesno prezahteven ali nevaren. Zgodovina slovenske energetike je predstavljena predvsem na muzejskih tablah — ne kot nekaj, kar bi lahko doživeli.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">VR rešitev</p>
+    <h3>Vzpon skozi čas</h3>
+    <p>Uporabnik pleza po zunanji konstrukciji elektrarne. Ob kontrolnih točkah se odpre zgodovina gradnje in razvoja TEŠ, na vrhu pa ga čaka razgled na Šaleško dolino in naraven učinek vrtoglavice ob robu.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">Ključne funkcionalnosti in interakcije</p>
+    <h3>Kaj uporabnik dejansko počne</h3>
+    <ul>
+      <li><strong>Prosta hoja</strong> — WASD gibanje, miška za pogled (v VR: hoja + pogled z glavo/kontrolerji).</li>
+      <li><strong>Plezanje</strong> — pristop k steni in vlečenje navzgor (W ob steni).</li>
+      <li><strong>Zgodovinske info-točke</strong> — se prikažejo ob določenih višinah med vzponom.</li>
+      <li><strong>Hoja po vrhu</strong> — prosto gibanje po ploščadi, bližina roba naravno sproži vrtoglavico.</li>
+    </ul>
+  </section>
+
+  <section>
+    <p class="eyebrow">Uporabljene tehnologije</p>
+    <h3>WebXR</h3>
+    <p>Aplikacija je zasnovana za <strong>WebXR</strong> (spletne VR/AR aplikacije) — teče neposredno v brskalniku, brez namestitve, in se lahko odpre tudi v brskalniku Meta Quest. Ta prednost je bila odločilna: hitro iteriranje in takojšen zagon na napravi, brez ločenega gradbenega procesa.</p>
+    <div class="tech-row">
+      <span class="tech-pill">WebXR Device API</span>
+      <span class="tech-pill">JavaScript · Canvas</span>
+      <span class="tech-pill">Meta Quest brskalnik</span>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Dodana vrednost</p>
+    <h3>Zakaj je to vredno</h3>
+    <p>Varen dostop do sicer nedostopnega industrijskega prostora, izkustvena pot do zgodovine slovenske energetike, in — z nadzorovano izpostavljenostjo višini — možna uporaba pri postopnem spopadanju s strahom pred višino.</p>
+  </section>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var canvas = document.getElementById('scene');
+  var ctx = canvas.getContext('2d');
+
+  var heightVal = document.getElementById('heightVal');
+  var progressFill = document.getElementById('progressFill');
+  var infoCard = document.getElementById('infoCard');
+  var infoYear = document.getElementById('infoYear');
+  var infoTitle = document.getElementById('infoTitle');
+  var infoText = document.getElementById('infoText');
+  var vertigoWarning = document.getElementById('vertigoWarning');
+  var resetBtn = document.getElementById('resetBtn');
+  var infoToggle = document.getElementById('infoToggle');
+  var infoPanel = document.getElementById('infoPanel');
+  var closeInfo = document.getElementById('closeInfo');
+  var backdrop = document.getElementById('backdrop');
+
+  infoToggle.addEventListener('click', function(){ infoPanel.classList.add('open'); backdrop.classList.add('open'); });
+  closeInfo.addEventListener('click', function(){ infoPanel.classList.remove('open'); backdrop.classList.remove('open'); });
+  backdrop.addEventListener('click', function(){ infoPanel.classList.remove('open'); backdrop.classList.remove('open'); });
+
+  // ---------------- world data ----------------
+  var TOWER = { x:0, z:14, halfW:5, halfD:5, height:42 };
+  var WALL_Z = TOWER.z - TOWER.halfD;
+  var EYE_HEIGHT = 1.7;
+
+  var AUX_BUILDINGS = [
+    { x:-15, z:22, halfW:3.2, halfD:3.2, height:11, color:[80,92,102] },
+    { x:17,  z:27, halfW:2.4, halfD:2.4, height:7,  color:[122,84,58]  },
+    { x:-9,  z:34, halfW:2,   halfD:2,   height:16, color:[70,80,90]  }
+  ];
+
+  var HOLDS = [];
+  (function buildHolds(){
+    for (var y = 3; y < TOWER.height - 2; y += 3.4){
+      HOLDS.push({ y: y, x: (pseudoRandom(y) * 2 - 1) * (TOWER.halfW - 1.2) });
+    }
+  })();
+
+  var HISTORY = [
+    { at: 9,  year: '1955',      title: 'Začetek gradnje',   text: 'Ob premogovniku v Šaleški dolini se začne gradnja termoelektrarne.' },
+    { at: 21, year: '1956–1972', title: 'Rast zmogljivosti',  text: 'V treh desetletjih zraste šest proizvodnih enot, ki oskrbujejo vso regijo.' },
+    { at: 33, year: '2015',      title: 'Blok TEŠ 6',         text: 'Zažene se najsodobnejša in največja proizvodna enota v Sloveniji.' }
+  ];
+
+  function pseudoRandom(seed){
+    var x = Math.sin(seed * 12.9898) * 43758.5453;
+    return x - Math.floor(x);
+  }
+  function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+  function lerp(a, b, t){ return a + (b - a) * t; }
+
+  // ---------------- player state ----------------
+  var player = {
+    x: 0, z: WALL_Z - 9, groundY: 0,
+    yaw: 0, pitch: 0,
+    phase: 'ground' // ground | climbing | top
+  };
+  var vertigo = 0;
+  var activeInfo = -1;
+
+  var keys = {};
+  window.addEventListener('keydown', function(e){
+    keys[e.code] = true;
+    if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].indexOf(e.code) !== -1) e.preventDefault();
+  });
+  window.addEventListener('keyup', function(e){ keys[e.code] = false; });
+
+  var drag = { active:false, lastX:0, lastY:0 };
+  canvas.addEventListener('pointerdown', function(e){
+    drag.active = true; drag.lastX = e.clientX; drag.lastY = e.clientY;
+    canvas.classList.add('dragging');
+  });
+  window.addEventListener('pointerup', function(){ drag.active = false; canvas.classList.remove('dragging'); });
+  window.addEventListener('pointermove', function(e){
+    if (!drag.active) return;
+    var dx = e.clientX - drag.lastX, dy = e.clientY - drag.lastY;
+    drag.lastX = e.clientX; drag.lastY = e.clientY;
+    player.yaw += dx * 0.0045;
+    player.pitch = clamp(player.pitch - dy * 0.0045, -1.25, 1.25);
+  });
+
+  resetBtn.addEventListener('click', function(){
+    player.x = 0; player.z = WALL_Z - 9; player.groundY = 0;
+    player.yaw = 0; player.pitch = 0; player.phase = 'ground';
+    vertigo = 0; activeInfo = -1;
+    infoCard.classList.remove('visible');
+  });
+
+  // ---------------- resize ----------------
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var W = 0, H = 0;
+  function resize(){
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------------- camera math ----------------
+  function cross(a, b){
+    return { x:a.y*b.z-a.z*b.y, y:a.z*b.x-a.x*b.z, z:a.x*b.y-a.y*b.x };
+  }
+  function dot(a, b){ return a.x*b.x + a.y*b.y + a.z*b.z; }
+  function norm(a){
+    var l = Math.hypot(a.x, a.y, a.z) || 1;
+    return { x:a.x/l, y:a.y/l, z:a.z/l };
+  }
+
+  var cam = { pos:{x:0,y:0,z:0}, forward:{x:0,y:0,z:1}, right:{x:1,y:0,z:0}, up:{x:0,y:1,z:0}, f:0 };
+
+  function updateCamera(){
+    var yaw = player.yaw, pitch = player.pitch;
+    cam.pos = { x: player.x, y: player.groundY + EYE_HEIGHT, z: player.z };
+    cam.forward = { x: Math.sin(yaw) * Math.cos(pitch), y: Math.sin(pitch), z: Math.cos(yaw) * Math.cos(pitch) };
+    cam.right = { x: Math.cos(yaw), y: 0, z: -Math.sin(yaw) };
+    cam.up = norm(cross(cam.forward, cam.right));
+    var fovY = 78 * Math.PI / 180;
+    cam.f = (H / 2) / Math.tan(fovY / 2);
+  }
+
+  function toCamera(p){
+    var rel = { x:p.x-cam.pos.x, y:p.y-cam.pos.y, z:p.z-cam.pos.z };
+    return { x: dot(rel, cam.right), y: dot(rel, cam.up), z: dot(rel, cam.forward) };
+  }
+  function project(camP){
+    if (camP.z < 0.05) return null;
+    var s = cam.f / camP.z;
+    return { x: W/2 + camP.x * s, y: H/2 - camP.y * s, z: camP.z };
+  }
+
+  // ---------------- movement & collisions ----------------
+  function update(dt){
+    var mf = 0, mr = 0;
+    if (keys['KeyW'] || keys['ArrowUp']) mf += 1;
+    if (keys['KeyS'] || keys['ArrowDown']) mf -= 1;
+    if (keys['KeyD'] || keys['ArrowRight']) mr += 1;
+    if (keys['KeyA'] || keys['ArrowLeft']) mr -= 1;
+
+    var fx = Math.sin(player.yaw), fz = Math.cos(player.yaw);
+    var rx = Math.cos(player.yaw), rz = -Math.sin(player.yaw);
+
+    if (player.phase === 'ground'){
+      var dx = fx*mf + rx*mr, dz = fz*mf + rz*mr;
+      var len = Math.hypot(dx, dz);
+      if (len > 0){ dx/=len; dz/=len; }
+      var speed = 6.5;
+      var nx = player.x + dx*speed*dt;
+      var nz = player.z + dz*speed*dt;
+      var withinX = nx > TOWER.x - TOWER.halfW + 0.6 && nx < TOWER.x + TOWER.halfW - 0.6;
+
+      if (nz >= WALL_Z - 0.5 && withinX){
+        if (mf > 0){
+          player.phase = 'climbing';
+          player.z = WALL_Z - 0.5;
+          player.x = clamp(nx, TOWER.x - TOWER.halfW + 0.8, TOWER.x + TOWER.halfW - 0.8);
+        } else {
+          player.x = nx;
+          player.z = Math.min(nz, WALL_Z - 0.5);
+        }
+      } else {
+        player.x = nx; player.z = nz;
+      }
+    } else if (player.phase === 'climbing'){
+      var climbSpeed = 9;
+      if (mf > 0) player.groundY += climbSpeed * dt;
+      if (mf < 0) player.groundY -= climbSpeed * dt;
+      player.groundY = clamp(player.groundY, 0, TOWER.height);
+      if (mr !== 0){
+        player.x = clamp(player.x + mr*4*dt, TOWER.x - TOWER.halfW + 0.8, TOWER.x + TOWER.halfW - 0.8);
+      }
+      if (player.groundY <= 0){
+        player.phase = 'ground';
+        player.z = WALL_Z - 3;
+      } else if (player.groundY >= TOWER.height){
+        player.phase = 'top';
+        player.groundY = TOWER.height;
+        player.z = clamp(player.z, TOWER.z - TOWER.halfD + 0.8, TOWER.z + TOWER.halfD - 0.8);
+      }
+      updateHistoryCard();
+    } else if (player.phase === 'top'){
+      var dx2 = fx*mf + rx*mr, dz2 = fz*mf + rz*mr;
+      var len2 = Math.hypot(dx2, dz2);
+      if (len2 > 0){ dx2/=len2; dz2/=len2; }
+      var speed2 = 5.2;
+      var xMin = TOWER.x - TOWER.halfW + 0.6, xMax = TOWER.x + TOWER.halfW - 0.6;
+      var zMin = TOWER.z - TOWER.halfD + 0.6, zMax = TOWER.z + TOWER.halfD - 0.6;
+      player.x = clamp(player.x + dx2*speed2*dt, xMin, xMax);
+      player.z = clamp(player.z + dz2*speed2*dt, zMin, zMax);
+      var edgeDist = Math.min(player.x - xMin, xMax - player.x, player.z - zMin, zMax - player.z);
+      vertigo = clamp(1 - edgeDist / 1.6, 0, 1);
+    }
+
+    var climbT = clamp(player.groundY / TOWER.height, 0, 1);
+    heightVal.textContent = Math.round(climbT * 180);
+    progressFill.style.width = (climbT * 100) + '%';
+
+    if (player.phase !== 'climbing') infoCard.classList.remove('visible');
+
+    document.querySelector('body').classList.toggle('shake', vertigo > 0.15);
+    vertigoWarning.classList.toggle('visible', vertigo > 0.15);
+  }
+
+  function updateHistoryCard(){
+    var found = -1;
+    for (var i = 0; i < HISTORY.length; i++){
+      if (Math.abs(player.groundY - HISTORY[i].at) < 3.2) { found = i; break; }
+    }
+    if (found !== activeInfo){
+      activeInfo = found;
+      if (found >= 0){
+        var item = HISTORY[found];
+        infoYear.textContent = item.year;
+        infoTitle.textContent = item.title;
+        infoText.textContent = item.text;
+        infoCard.classList.add('visible');
+      } else {
+        infoCard.classList.remove('visible');
+      }
+    }
+  }
+
+  // ---------------- rendering ----------------
+  var SKY_LOW = { top:[26,36,49], hor:[201,138,94] };
+  var SKY_HIGH = { top:[130,175,222], hor:[255,214,168] };
+
+  function skyColors(){
+    var t = clamp(player.groundY / TOWER.height, 0, 1);
+    return {
+      top: [ lerp(SKY_LOW.top[0], SKY_HIGH.top[0], t), lerp(SKY_LOW.top[1], SKY_HIGH.top[1], t), lerp(SKY_LOW.top[2], SKY_HIGH.top[2], t) ],
+      hor: [ lerp(SKY_LOW.hor[0], SKY_HIGH.hor[0], t), lerp(SKY_LOW.hor[1], SKY_HIGH.hor[1], t), lerp(SKY_LOW.hor[2], SKY_HIGH.hor[2], t) ]
+    };
+  }
+  function rgbStr(c){ return 'rgb(' + (c[0]|0) + ',' + (c[1]|0) + ',' + (c[2]|0) + ')'; }
+  function rgbaStr(c, a){ return 'rgba(' + (c[0]|0) + ',' + (c[1]|0) + ',' + (c[2]|0) + ',' + a + ')'; }
+
+  function horizonScreenY(){
+    var dirX = Math.sin(player.yaw), dirZ = Math.cos(player.yaw);
+    var far = { x: cam.pos.x + dirX*4000, y: 0, z: cam.pos.z + dirZ*4000 };
+    var cp = toCamera(far);
+    var pr = project(cp);
+    if (!pr) return player.pitch > 0 ? H : 0;
+    return clamp(pr.y, -H*0.6, H*1.6);
+  }
+
+  function drawSkyGround(){
+    var sky = skyColors();
+    var hy = horizonScreenY();
+
+    var skyGrad = ctx.createLinearGradient(0, 0, 0, Math.max(hy,1));
+    skyGrad.addColorStop(0, rgbStr(sky.top));
+    skyGrad.addColorStop(1, rgbStr(sky.hor));
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, Math.max(hy, 0));
+
+    var groundNear = [70, 84, 62];
+    var groundGrad = ctx.createLinearGradient(0, hy, 0, H);
+    groundGrad.addColorStop(0, rgbStr(sky.hor));
+    groundGrad.addColorStop(0.12, rgbStr(groundNear));
+    groundGrad.addColorStop(1, 'rgb(40,48,38)');
+    ctx.fillStyle = groundGrad;
+    ctx.fillRect(0, Math.max(hy,0), W, H - Math.max(hy,0));
+
+    // sun (true 3D point far away)
+    var sunWorld = { x: 260, y: 140, z: TOWER.z + 300 };
+    var sunCam = toCamera(sunWorld);
+    var sunP = project(sunCam);
+    if (sunP){
+      ctx.beginPath();
+      ctx.arc(sunP.x, sunP.y, 44, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(255,244,220,0.85)';
+      ctx.fill();
+    }
+
+    // distant hill silhouette (parallax by yaw)
+    var offset = -(player.yaw * 220) % (W*2);
+    ctx.fillStyle = rgbaStr([Math.max(sky.hor[0]-60,20), Math.max(sky.hor[1]-50,30), Math.max(sky.hor[2]-40,30)], 0.55);
+    ctx.beginPath();
+    ctx.moveTo(-W + offset, hy);
+    for (var hx = -W; hx <= W*2; hx += 60){
+      var yy = hy - 26 - 20*Math.sin((hx+1000)*0.006) - 10*Math.sin((hx+300)*0.017);
+      ctx.lineTo(hx + offset, yy);
+    }
+    ctx.lineTo(W*2 + offset, hy + 40);
+    ctx.lineTo(-W + offset, hy + 40);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawGrid(){
+    ctx.strokeStyle = 'rgba(255,255,255,0.09)';
+    ctx.lineWidth = 1;
+    var range = 90, step = 6;
+    for (var gx = -range; gx <= range; gx += step){
+      drawWorldLine({x:gx,y:0,z:-range}, {x:gx,y:0,z:range});
+    }
+    for (var gz = -range; gz <= range; gz += step){
+      drawWorldLine({x:-range,y:0,z:gz}, {x:range,y:0,z:gz});
+    }
+  }
+  function drawWorldLine(a, b){
+    var ca = toCamera(a), cb = toCamera(b);
+    if (ca.z < 0.05 && cb.z < 0.05) return;
+    if (ca.z < 0.05){ ca = clipNear(ca, cb); }
+    if (cb.z < 0.05){ cb = clipNear(cb, ca); }
+    var pa = project(ca), pb = project(cb);
+    if (!pa || !pb) return;
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.stroke();
+  }
+  function clipNear(bad, good){
+    var t = (0.05 - bad.z) / (good.z - bad.z);
+    return { x: lerp(bad.x, good.x, t), y: lerp(bad.y, good.y, t), z: 0.05 };
+  }
+
+  function buildBoxFaces(box, colorRGB){
+    var xMin = box.x - box.halfW, xMax = box.x + box.halfW;
+    var zMin = box.z - box.halfD, zMax = box.z + box.halfD;
+    var yTop = box.height;
+    return [
+      { normal:{x:0,y:1,z:0}, shade:1.15, verts:[{x:xMin,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMax},{x:xMin,y:yTop,z:zMax}] },
+      { normal:{x:0,y:0,z:-1}, shade:1.0, verts:[{x:xMin,y:0,z:zMin},{x:xMax,y:0,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMin}] },
+      { normal:{x:0,y:0,z:1}, shade:0.55, verts:[{x:xMax,y:0,z:zMax},{x:xMin,y:0,z:zMax},{x:xMin,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMax}] },
+      { normal:{x:-1,y:0,z:0}, shade:0.72, verts:[{x:xMin,y:0,z:zMax},{x:xMin,y:0,z:zMin},{x:xMin,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMax}] },
+      { normal:{x:1,y:0,z:0}, shade:0.86, verts:[{x:xMax,y:0,z:zMin},{x:xMax,y:0,z:zMax},{x:xMax,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMin}] }
+    ].map(function(f){ f.color = colorRGB; f.center = {x:box.x,y:box.height*0.5,z:box.z}; return f; });
+  }
+
+  function drawBuildings(){
+    var faces = [];
+    faces = faces.concat(buildBoxFaces(TOWER, [90,99,107]));
+    AUX_BUILDINGS.forEach(function(b){ faces = faces.concat(buildBoxFaces(b, b.color)); });
+
+    var visible = [];
+    faces.forEach(function(f){
+      var toCam = { x: cam.pos.x - f.center.x, y: cam.pos.y - f.center.y, z: cam.pos.z - f.center.z };
+      if (dot(f.normal, toCam) <= 0) return;
+      var projected = [];
+      var minZ = Infinity, sumZ = 0, behind = 0;
+      f.verts.forEach(function(v){
+        var cp = toCamera(v);
+        sumZ += cp.z;
+        if (cp.z < 0.05) behind++;
+        minZ = Math.min(minZ, cp.z);
+      });
+      if (behind === f.verts.length) return;
+      f.avgZ = sumZ / f.verts.length;
+      visible.push(f);
+    });
+
+    visible.sort(function(a,b){ return b.avgZ - a.avgZ; });
+
+    visible.forEach(function(f){
+      var pts = [];
+      var n = f.verts.length;
+      for (var i = 0; i < n; i++){
+        var a = toCamera(f.verts[i]);
+        var b = toCamera(f.verts[(i+1)%n]);
+        if (a.z >= 0.05){
+          var pa = project(a);
+          if (pa) pts.push(pa);
+        }
+        if ((a.z < 0.05) !== (b.z < 0.05)){
+          var c = a.z < 0.05 ? clipNear(a,b) : clipNear(b,a);
+          var pc = project(c);
+          if (pc) pts.push(pc);
+        }
+      }
+      if (pts.length < 3) return;
+
+      var fog = clamp(f.avgZ / 140, 0, 1);
+      var sky = skyColors();
+      var shaded = [ f.color[0]*f.shade, f.color[1]*f.shade, f.color[2]*f.shade ];
+      var finalColor = [
+        lerp(shaded[0], sky.hor[0], fog*0.7),
+        lerp(shaded[1], sky.hor[1], fog*0.7),
+        lerp(shaded[2], sky.hor[2], fog*0.7)
+      ];
+
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (var j = 1; j < pts.length; j++) ctx.lineTo(pts[j].x, pts[j].y);
+      ctx.closePath();
+      ctx.fillStyle = rgbStr(finalColor);
+      ctx.fill();
+    });
+  }
+
+  function drawHolds(){
+    if (player.phase === 'top') return;
+    HOLDS.forEach(function(h){
+      var world = { x: TOWER.x + h.x, y: h.y, z: WALL_Z - 0.12 };
+      var cp = toCamera(world);
+      if (cp.z < 0.1) return;
+      var p = project(cp);
+      if (!p) return;
+      var dist = Math.hypot(cp.x, cp.y, cp.z);
+      var size = clamp(220 / dist, 3, 16);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, size, 0, Math.PI*2);
+      ctx.fillStyle = '#ff7a3d';
+      ctx.fill();
+      ctx.lineWidth = Math.max(1, size*0.15);
+      ctx.strokeStyle = 'rgba(20,24,29,0.55)';
+      ctx.stroke();
+    });
+  }
+
+  function drawVertigoOverlay(){
+    if (vertigo <= 0.02) return;
+    var vg = ctx.createRadialGradient(W/2, H/2, H*0.22, W/2, H/2, H*0.85);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(20,8,8,' + (vertigo*0.75) + ')');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0,0,W,H);
+  }
+
+  // ---------------- main loop ----------------
+  var lastT = 0;
+  function frame(ts){
+    if (!lastT) lastT = ts;
+    var dt = Math.min((ts - lastT)/1000, 0.05);
+    lastT = ts;
+
+    update(dt);
+    updateCamera();
+
+    drawSkyGround();
+    drawGrid();
+    drawBuildings();
+    drawHolds();
+    drawVertigoOverlay();
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>
