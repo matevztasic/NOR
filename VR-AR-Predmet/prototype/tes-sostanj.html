@@ -316,7 +316,7 @@
 
 <div class="hint">
   <kbd>W A S D</kbd> gibanje · <span id="lookHint">klikni za prost pogled z miško</span><br>
-  Pojdi do stolpa in drži <kbd>W</kbd> za vzpon
+  Pojdi do stolpa in drži <kbd>W</kbd> za vzpon · <kbd>Shift</kbd> za tek
 </div>
 <div class="crosshair" id="crosshair"></div>
 
@@ -638,16 +638,18 @@
     player.pitch = clamp(player.pitch - e.movementY * 0.0028, -1.25, 1.25);
   });
 
-  // Fallback: click-and-drag look, used only if pointer lock is unavailable/refused.
+  // Click-and-drag look, always available as a baseline (not just when pointer lock is
+  // known to have failed) - if the browser silently declines pointer lock without firing
+  // an error event, this still works instead of leaving the player with no way to look around.
   var drag = { active:false, lastX:0, lastY:0 };
   canvas.addEventListener('pointerdown', function(e){
-    if (!lockFallback) return;
+    if (isLocked) return;
     drag.active = true; drag.lastX = e.clientX; drag.lastY = e.clientY;
     canvas.classList.add('dragging');
   });
   window.addEventListener('pointerup', function(){ drag.active = false; canvas.classList.remove('dragging'); });
   window.addEventListener('pointermove', function(e){
-    if (!lockFallback || !drag.active) return;
+    if (isLocked || !drag.active) return;
     var dx = e.clientX - drag.lastX, dy = e.clientY - drag.lastY;
     drag.lastX = e.clientX; drag.lastY = e.clientY;
     player.yaw += dx * 0.0045;
@@ -657,12 +659,10 @@
   function updateLookHint(){
     var hint = document.getElementById('lookHint');
     if (!hint) return;
-    if (lockFallback){
-      hint.textContent = 'Klik + vleci za pogled';
-    } else if (isLocked){
+    if (isLocked){
       hint.textContent = 'Esc za izhod iz pogleda';
     } else {
-      hint.textContent = 'Klikni za prost pogled z miško';
+      hint.textContent = 'Klikni za pogled, ali klik + vleci';
     }
   }
 
@@ -724,6 +724,7 @@
     if (keys['KeyS'] || keys['ArrowDown']) mf -= 1;
     if (keys['KeyD'] || keys['ArrowRight']) mr += 1;
     if (keys['KeyA'] || keys['ArrowLeft']) mr -= 1;
+    var sprint = (keys['ShiftLeft'] || keys['ShiftRight']) ? 1.7 : 1;
 
     var fx = Math.sin(player.yaw), fz = Math.cos(player.yaw);
     var rx = Math.cos(player.yaw), rz = -Math.sin(player.yaw);
@@ -732,7 +733,7 @@
       var dx = fx*mf + rx*mr, dz = fz*mf + rz*mr;
       var len = Math.hypot(dx, dz);
       if (len > 0){ dx/=len; dz/=len; }
-      var speed = 6.5;
+      var speed = 6.5 * sprint;
       var nx = player.x + dx*speed*dt;
       var nz = player.z + dz*speed*dt;
       var withinLadderX = nx > TOWER.x - LADDER_HALF_X && nx < TOWER.x + LADDER_HALF_X;
@@ -758,7 +759,7 @@
         }
       }
     } else if (player.phase === 'climbing'){
-      var climbSpeed = 9;
+      var climbSpeed = 9 * sprint;
       if (mf > 0) player.groundY += climbSpeed * dt;
       if (mf < 0) player.groundY -= climbSpeed * dt;
       player.groundY = clamp(player.groundY, 0, TOWER.height);
@@ -777,7 +778,7 @@
       var dx2 = fx*mf + rx*mr, dz2 = fz*mf + rz*mr;
       var len2 = Math.hypot(dx2, dz2);
       if (len2 > 0){ dx2/=len2; dz2/=len2; }
-      var speed2 = 5.2;
+      var speed2 = 5.2 * sprint;
       var nx2 = player.x + dx2*speed2*dt;
       var nz2 = player.z + dz2*speed2*dt;
       var topR = TOWER_VIS.rings[TOWER_VIS.rings.length-1].r - 0.7;
