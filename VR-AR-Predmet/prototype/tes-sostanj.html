@@ -46,20 +46,6 @@
   canvas#scene.dragging{ cursor:grabbing; }
   canvas#scene.locked{ cursor:none; }
 
-  .crosshair{
-    position:fixed;
-    top:50%; left:50%;
-    width:6px; height:6px;
-    margin:-3px 0 0 -3px;
-    border-radius:50%;
-    background:var(--paper);
-    box-shadow:0 0 0 1px rgba(0,0,0,.5);
-    opacity:0;
-    pointer-events:none;
-    z-index:4;
-  }
-  canvas#scene.locked ~ .crosshair{ opacity:.85; }
-
   body.shake canvas#scene{ animation:vertigo-shake .28s infinite; }
   @keyframes vertigo-shake{
     0%{ transform:translate(0,0); }
@@ -318,8 +304,6 @@
   <kbd>W A S D</kbd> gibanje · <span id="lookHint">klikni za prost pogled z miško</span><br>
   Pojdi do stolpa in drži <kbd>W</kbd> za vzpon · <kbd>Shift</kbd> za tek
 </div>
-<div class="crosshair" id="crosshair"></div>
-
 <button class="icon-btn reset-btn" id="resetBtn">⟲ Ponastavi</button>
 
 <div class="info-card" id="infoCard">
@@ -562,6 +546,15 @@
       var fz = 62 + pseudoRandom(fseed+1)*56;
       if (Math.hypot(fx-TOWER.x, fz-TOWER.z) < 13) continue;
       TREES.push({ x:fx, z:fz, h: 2.8+pseudoRandom(fseed+2)*3.2 });
+    }
+    // treeline ringing the lake shore (lake itself defined further down as LAKE, kept in
+    // sync manually here since this runs before that declaration)
+    var lakeX = -150, lakeZ = 220, lakeR = 46;
+    for (var k = 0; k < 40; k++){
+      var lseed = 600 + k*3.31;
+      var ang = pseudoRandom(lseed) * Math.PI*2;
+      var ringDist = lakeR + 4 + pseudoRandom(lseed+1) * 26;
+      TREES.push({ x: lakeX + Math.cos(ang)*ringDist, z: lakeZ + Math.sin(ang)*ringDist, h: 2.6+pseudoRandom(lseed+2)*3.4 });
     }
   })();
 
@@ -1454,12 +1447,12 @@
   function drawTrees(){
     TREES.forEach(function(t){
       var cpBase = toCamera({x:t.x, y:0, z:t.z});
-      if (cpBase.z < 1 || cpBase.z > 110) return;
+      if (cpBase.z < 1 || cpBase.z > 280) return;
       var baseP = project(cpBase);
       var topP = project(toCamera({x:t.x, y:t.h, z:t.z}));
       if (!baseP || !topP) return;
       var screenH = Math.abs(baseP.y - topP.y) * 1.7;
-      if (screenH < 4 || screenH > H*1.2) return;
+      if (screenH < 2 || screenH > H*1.2) return;
       ctx.drawImage(TREE_SPRITE, baseP.x-screenH/2, baseP.y-screenH, screenH, screenH);
     });
   }
