@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="800" height="500">
+  <defs>
+    <linearGradient id="sky3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff9a5a"/>
+      <stop offset="45%" stop-color="#ffd39a"/>
+      <stop offset="100%" stop-color="#bcd6e8"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="800" height="500" fill="url(#sky3)"/>
+
+  <!-- sun -->
+  <circle cx="640" cy="90" r="45" fill="#fff2c9" opacity="0.9"/>
+
+  <!-- distant clouds far below (height depth cue) -->
+  <g fill="#ffffff" opacity="0.85">
+    <ellipse cx="150" cy="330" rx="90" ry="22"/>
+    <ellipse cx="230" cy="345" rx="70" ry="18"/>
+    <ellipse cx="600" cy="320" rx="100" ry="24"/>
+    <ellipse cx="500" cy="340" rx="60" ry="16"/>
+  </g>
+
+  <!-- hazy valley far below -->
+  <rect x="0" y="360" width="800" height="140" fill="#8fae6b" opacity="0.35"/>
+
+  <!-- circular top platform, seen in first-person perspective -->
+  <ellipse cx="400" cy="440" rx="380" ry="90" fill="#5b6570"/>
+  <ellipse cx="400" cy="430" rx="340" ry="75" fill="#79828d"/>
+  <ellipse cx="400" cy="430" rx="200" ry="42" fill="#8b95a0"/>
+
+  <!-- railing edge suggesting exposure -->
+  <g stroke="#2c3238" stroke-width="4" fill="none" opacity="0.7">
+    <path d="M 60 430 Q 400 500 740 430"/>
+  </g>
+  <g stroke="#2c3238" stroke-width="3">
+    <line x1="100" y1="415" x2="100" y2="440"/>
+    <line x1="250" y1="455" x2="250" y2="480"/>
+    <line x1="550" y1="455" x2="550" y2="480"/>
+    <line x1="700" y1="415" x2="700" y2="440"/>
+  </g>
+
+  <!-- first-person feet at the very edge -->
+  <g fill="#1c1f24">
+    <ellipse cx="360" cy="490" rx="22" ry="10"/>
+    <ellipse cx="440" cy="492" rx="22" ry="10"/>
+  </g>
+
+  <!-- vertigo visual effect: wavy distortion rings -->
+  <g stroke="#ffffff" fill="none" opacity="0.35">
+    <ellipse cx="400" cy="300" rx="360" ry="230" stroke-width="3"/>
+    <ellipse cx="400" cy="300" rx="300" ry="190" stroke-width="2"/>
+  </g>
+
+  <!-- HUD: height warning -->
+  <rect x="290" y="30" width="220" height="46" rx="8" fill="#000000" opacity="0.55"/>
+  <text x="400" y="52" font-family="Arial, sans-serif" font-size="14" fill="#ff6b6b" text-anchor="middle">⚠ Višina: 180 m</text>
+  <text x="400" y="68" font-family="Arial, sans-serif" font-size="11" fill="#ffffff" text-anchor="middle">Previdno pri robu</text>
+</svg>
