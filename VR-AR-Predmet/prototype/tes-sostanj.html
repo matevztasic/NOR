@@ -875,24 +875,39 @@
     }
   }
 
-  // ---------------- clouds ----------------
+  // ---------------- clouds & atmosphere ----------------
+  var CLOUD_WRAP = 3200;
   var CLOUD_PUFFS = [];
   (function buildClouds(){
-    for (var i = 0; i < 11; i++){
+    for (var i = 0; i < 22; i++){
       var seed = i*3.77;
       CLOUD_PUFFS.push({
-        x: pseudoRandom(seed) * 2600,
-        y: 50 + pseudoRandom(seed+1) * 230,
-        scale: 0.55 + pseudoRandom(seed+2) * 1.15,
-        parallax: 0.45 + pseudoRandom(seed+3) * 0.55,
-        alpha: 0.55 + pseudoRandom(seed+4) * 0.35
+        x: pseudoRandom(seed) * CLOUD_WRAP,
+        y: 20 + pseudoRandom(seed+1) * 270,
+        scale: 0.6 + pseudoRandom(seed+2) * 1.35,
+        parallax: 0.4 + pseudoRandom(seed+3) * 0.6,
+        alpha: 0.68 + pseudoRandom(seed+4) * 0.3
+      });
+    }
+  })();
+
+  var CIRRUS = [];
+  (function buildCirrus(){
+    for (var i = 0; i < 8; i++){
+      var seed = i*9.13 + 50;
+      CIRRUS.push({
+        x: pseudoRandom(seed) * CLOUD_WRAP,
+        y: 220 + pseudoRandom(seed+1) * 90,
+        len: 90 + pseudoRandom(seed+2) * 140,
+        parallax: 0.22 + pseudoRandom(seed+3) * 0.2,
+        alpha: 0.22 + pseudoRandom(seed+4) * 0.22
       });
     }
   })();
 
   function drawCloudCluster(cx, cy, scale, alpha){
     ctx.fillStyle = 'rgba(255,255,255,' + alpha + ')';
-    var blobs = [ [0,0,1], [0.55,-0.12,0.78], [-0.55,-0.06,0.72], [0.95,0.05,0.55], [-0.95,0.08,0.5], [0.15,0.16,0.7] ];
+    var blobs = [ [0,0,1], [0.55,-0.12,0.78], [-0.55,-0.06,0.72], [0.95,0.05,0.55], [-0.95,0.08,0.5], [0.15,0.16,0.7], [-0.2,-0.2,0.6] ];
     blobs.forEach(function(b){
       var r = 24*scale*b[2];
       ctx.beginPath();
@@ -901,25 +916,44 @@
     });
   }
 
+  function wrapX(raw){
+    return ((raw % CLOUD_WRAP) + CLOUD_WRAP) % CLOUD_WRAP - CLOUD_WRAP/2 + W/2;
+  }
+
   function drawClouds(hy){
     var t = clamp(player.groundY / TOWER.height, 0, 1);
     var offset = -(player.yaw * 160);
-    var wrapW = 2600;
 
+    // thin high cirrus streaks - always present, subtle, slow parallax
     ctx.save();
-    if (typeof ctx.filter === 'string') ctx.filter = 'blur(9px)';
+    if (typeof ctx.filter === 'string') ctx.filter = 'blur(4px)';
+    CIRRUS.forEach(function(c){
+      var sx = wrapX(c.x + offset*c.parallax);
+      if (sx < -c.len-40 || sx > W+c.len+40) return;
+      ctx.fillStyle = 'rgba(255,250,240,' + c.alpha + ')';
+      ctx.beginPath();
+      ctx.ellipse(sx, hy - c.y, c.len, 7, 0, 0, Math.PI*2);
+      ctx.fill();
+    });
+    ctx.restore();
+
+    // puffy mid-sky clouds, denser and more numerous, cover a wide spread of the sky
+    ctx.save();
+    if (typeof ctx.filter === 'string') ctx.filter = 'blur(10px)';
     CLOUD_PUFFS.forEach(function(c){
-      var raw = c.x + offset*c.parallax;
-      var sx = ((raw % wrapW) + wrapW) % wrapW - wrapW/2 + W/2;
-      if (sx < -140 || sx > W+140) return;
-      var alpha = c.alpha * clamp(0.55 + t*0.6, 0, 1);
+      var sx = wrapX(c.x + offset*c.parallax);
+      if (sx < -150 || sx > W+150) return;
+      var alpha = c.alpha * clamp(0.7 + t*0.4, 0, 1);
       drawCloudCluster(sx, hy - c.y, c.scale, alpha);
     });
     ctx.restore();
 
+    // soft sunbeams radiating from the sun disc through the cloud layer
+    drawSunbeams(hy);
+
     // cloud sea near the horizon, thickens dramatically as the climb progresses ("above the clouds")
-    if (t > 0.3){
-      var seaAlpha = clamp((t-0.3)/0.55, 0, 1) * 0.92;
+    if (t > 0.28){
+      var seaAlpha = clamp((t-0.28)/0.5, 0, 1) * 0.94;
       ctx.save();
       if (typeof ctx.filter === 'string') ctx.filter = 'blur(7px)';
       ctx.fillStyle = 'rgba(255,255,255,' + seaAlpha + ')';
@@ -935,6 +969,33 @@
       ctx.fill();
       ctx.restore();
     }
+  }
+
+  function drawSunbeams(hy){
+    var sunCam = toCamera(SUN_WORLD);
+    var sunP = project(sunCam);
+    if (!sunP || sunP.y > hy + 60) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    var beamCount = 5;
+    for (var i = 0; i < beamCount; i++){
+      var ang = -0.5 + (i/(beamCount-1))*1.0;
+      var len = H*0.9;
+      var spread = 0.05 + i%2*0.02;
+      var x1 = sunP.x + Math.sin(ang-spread)*len, y1 = sunP.y + Math.cos(ang-spread)*len*0.6 + len*0.3;
+      var x2 = sunP.x + Math.sin(ang+spread)*len, y2 = sunP.y + Math.cos(ang+spread)*len*0.6 + len*0.3;
+      ctx.beginPath();
+      ctx.moveTo(sunP.x, sunP.y);
+      ctx.lineTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.closePath();
+      var beamGrad = ctx.createRadialGradient(sunP.x, sunP.y, 0, sunP.x, sunP.y, len);
+      beamGrad.addColorStop(0, 'rgba(255,244,214,0.10)');
+      beamGrad.addColorStop(1, 'rgba(255,244,214,0)');
+      ctx.fillStyle = beamGrad;
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   function drawHillLayer(offset, hy, amp1, amp2){
@@ -1116,43 +1177,56 @@
     });
   }
 
+  // Windows are computed as real 3D points on the (genuinely flat, rectangular) wall,
+  // then run through the same toCamera/project pipeline as everything else - this keeps
+  // them perfectly locked to the wall from any angle (a 2D screen-space affine shortcut
+  // does NOT match true perspective and visibly drifts as the camera moves).
+  function lerpVec(base, ax, at, ay, av){
+    return { x: base.x + ax.x*at + ay.x*av, y: base.y + ax.y*at + ay.y*av, z: base.z + ax.z*at + ay.z*av };
+  }
   function drawWindowsOnFace(f){
-    var p0 = projectWorld(f.verts[0]), p1 = projectWorld(f.verts[1]),
-        p2 = projectWorld(f.verts[2]), p3 = projectWorld(f.verts[3]);
-    if (!p0 || !p1 || !p2 || !p3) return;
+    var w0 = f.verts[0], w1 = f.verts[1], w3 = f.verts[3];
+    var uVec = { x:w1.x-w0.x, y:w1.y-w0.y, z:w1.z-w0.z };
+    var vVec = { x:w3.x-w0.x, y:w3.y-w0.y, z:w3.z-w0.z };
+    var widthLen = Math.hypot(uVec.x, uVec.y, uVec.z);
+    var heightLen = Math.hypot(vVec.x, vVec.y, vVec.z);
+    if (widthLen < 2.5 || heightLen < 2) return;
 
-    var uAxisX = p1.x-p0.x, uAxisY = p1.y-p0.y;
-    var vAxisX = p3.x-p0.x, vAxisY = p3.y-p0.y;
-    var faceWidthPx = Math.hypot(uAxisX, uAxisY);
-    var faceHeightPx = Math.hypot(vAxisX, vAxisY);
-    if (faceWidthPx < 36 || faceHeightPx < 24) return;
+    var centerCam = toCamera(f.center);
+    if (centerCam.z < 1.5 || centerCam.z > 130) return;
 
-    var cols = clamp(Math.round(faceWidthPx/32), 2, 6);
-    var rows = clamp(Math.round(faceHeightPx/28), 2, 5);
+    var cols = clamp(Math.round(widthLen/2.1), 2, 6);
+    var rows = clamp(Math.round(heightLen/2.4), 2, 5);
 
     for (var r = 0; r < rows; r++){
       for (var c = 0; c < cols; c++){
         var u = (c+0.5)/cols, v = 0.14 + ((r+0.5)/rows)*0.74;
-        var cx = p0.x + u*uAxisX + v*vAxisX, cy = p0.y + u*uAxisY + v*vAxisY;
+        var wu = 0.4/cols, wv = 0.28/rows;
+        var corners = [
+          lerpVec(w0, uVec, u-wu, vVec, v-wv),
+          lerpVec(w0, uVec, u+wu, vVec, v-wv),
+          lerpVec(w0, uVec, u+wu, vVec, v+wv),
+          lerpVec(w0, uVec, u-wu, vVec, v+wv)
+        ];
+        var pts = [], ok = true;
+        for (var k = 0; k < 4; k++){
+          var cp = toCamera(corners[k]);
+          if (cp.z < 0.1){ ok = false; break; }
+          var pr = project(cp);
+          if (!pr){ ok = false; break; }
+          pts.push(pr);
+        }
+        if (!ok) continue;
+
         var lit = pseudoRandom(f.seed + r*13 + c*3) > 0.6;
-        var wu = 0.42/cols, wv = 0.3/rows;
-        var hx = wu*uAxisX, hy = wu*uAxisY, vx = wv*vAxisX, vy = wv*vAxisY;
         ctx.beginPath();
-        ctx.moveTo(cx-hx-vx, cy-hy-vy);
-        ctx.lineTo(cx+hx-vx, cy+hy-vy);
-        ctx.lineTo(cx+hx+vx, cy+hy+vy);
-        ctx.lineTo(cx-hx+vx, cy-hy+vy);
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (var pi = 1; pi < 4; pi++) ctx.lineTo(pts[pi].x, pts[pi].y);
         ctx.closePath();
         ctx.fillStyle = lit ? 'rgba(255,211,138,0.88)' : 'rgba(24,30,40,0.55)';
         ctx.fill();
       }
     }
-  }
-
-  function projectWorld(v){
-    var cp = toCamera(v);
-    if (cp.z < 0.15) return null;
-    return project(cp);
   }
 
   function drawHolds(){
