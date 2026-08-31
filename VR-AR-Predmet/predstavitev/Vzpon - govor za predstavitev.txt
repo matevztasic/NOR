@@ -1,0 +1,89 @@
+GOVOR ZA PREDSTAVITEV — Vzpon: Zgodba Šoštanjske elektrarne
+(preberi 2x, nato povej s svojimi besedami — ni treba na pamet, samo vedeti moraš, kaj sledi)
+
+────────────────────────────────────────
+1. NASLOVNICA
+────────────────────────────────────────
+Pozdravljeni, moj projekt se imenuje Vzpon — Zgodba Šoštanjske elektrarne. Je VR aplikacija
+za predmet Razvijanje aplikacij virtualne in obogatene resničnosti, mentor je Rok Urbanc.
+
+────────────────────────────────────────
+2. PROBLEM
+────────────────────────────────────────
+Hladilni stolp in dimnik TEŠ sta iz varnostnih razlogov zaprta za javnost, fizičen vzpon pa
+bi bil za večino prenevaren. Hkrati je zgodovina slovenske energetike predstavljena le na
+muzejskih tablah — ne kot nekaj, kar bi lahko doživeli. Zato sem naredil VR izkušnjo, ki
+uporabniku omogoči varen navidezni vzpon, med katerim spozna zgodovino elektrarne.
+
+────────────────────────────────────────
+3. CILJNA SKUPINA
+────────────────────────────────────────
+Aplikacija je namenjena štirim skupinam: šolam pri urah tehnike in zgodovine, turistom, ki
+jih zanima industrijska dediščina, ljudem s strahom pred višino za postopno izpostavljenostno
+terapijo, in zaposlenim v TEŠ pri uvajanju pred delom na višini.
+
+────────────────────────────────────────
+4. VR REŠITEV
+────────────────────────────────────────
+Uporabnik pleza po zunanji konstrukciji elektrarne. Ob kontrolnih točkah se med vzponom odpre
+zgodovina gradnje, na vrhu pa stopi na galerijo okoli odprtega žrela hladilnega stolpa — z
+razgledom na dolino in naravnim učinkom vrtoglavice.
+
+────────────────────────────────────────
+5. KLJUČNE FUNKCIONALNOSTI
+────────────────────────────────────────
+Gibanje je z WASD tipkami in miško za pogled. Ob steni stolpa se gibanje spremeni v plezanje.
+Med vzponom se prikažejo zgodovinske info-točke, na vrhu pa je galerija okoli odprtega žrela
+s sistemom, ki v realnem času prikazuje doseženo višino.
+
+────────────────────────────────────────
+6. TEHNOLOGIJE
+────────────────────────────────────────
+Aplikacija je zasnovana za WebXR — teče neposredno v brskalniku, tudi na Meta Quest napravi,
+brez namestitve. Unreal Engine sem opustil sredi projekta zaradi hitrosti razvoja. WebGL sem
+namenoma izpustil in namesto tega ročno napisal lasten Canvas2D 3D pogon.
+
+────────────────────────────────────────
+7. ARHITEKTURA (kako deluje)
+────────────────────────────────────────
+Ves 3D svet izračunam ročno na navadnem 2D platnu — vsaka točka gre skozi pravo perspektivno
+projekcijo. Ker Canvas2D nima globinskega bufferja, ploskve sam sortiram od najbolj oddaljenih
+do najbližjih. Stolp ima pravo hiperboloidno obliko, je votel, in ima gladko senčenje, da
+lupina deluje ukrivljeno, ne kot niz ravnih plošč.
+
+────────────────────────────────────────
+8. DEMO — vznožje in vzpon
+────────────────────────────────────────
+Tu je vznožje stolpa s kotlovnico, strojnico in dimnikom, ter pogled med samim vzponom, kjer
+lestev sledi ukrivljeni obliki stene.
+
+────────────────────────────────────────
+9. DEMO — vrh in žrelo
+────────────────────────────────────────
+Na vrhu je razgled na Šaleško dolino z gozdnatimi grebeni in Velenjskim jezerom. Spodaj je
+pogled v samo odprto žrelo stolpa, iz katerega se dviga para — tako kot pri pravem TEŠ,
+kjer je stolp v resnici votel s steno debelo le 18 centimetrov.
+
+────────────────────────────────────────
+10. DODANA VREDNOST
+────────────────────────────────────────
+Dodana vrednost je varen dostop do sicer nedostopnega industrijskega prostora, izkustvena pot
+do zgodovine slovenske energetike, in možnost uporabe pri postopnem soočanju s strahom pred
+višino.
+
+────────────────────────────────────────
+11. OMEJITVE IN NASLEDNJI KORAKI
+────────────────────────────────────────
+Trenutno gre za Canvas2D pogon, ne pravi WebGL, in aplikacija še ni bila testirana na dejanski
+Meta Quest napravi. Za končno oddajo načrtujem celoten vzpon, več info-točk in zvok.
+
+────────────────────────────────────────
+12. STRUKTURA REPOZITORIJA
+────────────────────────────────────────
+Celoten projekt je na GitHubu, organiziran po vajah — ideja, scene, tehnična zasnova — in
+nato prototip, ki je glavni del tega, kar sem danes pokazal.
+
+────────────────────────────────────────
+13. ZAKLJUČEK
+────────────────────────────────────────
+Hvala za pozornost. Z veseljem odgovorim na vprašanja.
