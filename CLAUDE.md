@@ -27,7 +27,11 @@ VR-AR-Predmet/
 
 ## `predstavitev/Vzpon-predstavitev.pptx`
 
-Zgrajen z `pptxgenjs` (Node) prek ene same skripte, ki NI shranjena v repozitoriju — obstajala je le začasno v seji, ki je datoteko generirala, samo izhodna `.pptx` je trajna. 13 prosojnic, strukturirane po petih kriterijih iz `final-app/README.md` ("Kriteriji za končno predstavitev"): problem/primer uporabe, VR rešitev + funkcionalnosti, tehnologije, delujoča demonstracija, dodana vrednost. Uporablja isto temno paleto barv kot `tes-sostanj.html` (ista `--ink`/`--ember` ipd. iz CSS). Demo prosojnici (8–9) vključujeta prave posnetke zaslona aplikacije (izrisane prek headless Canvas2D, ne mockup skice iz `vaja-02/`). Če se aplikacija spremeni, je treba prosojnico ročno obnoviti — ni avtomatske povezave med kodo in .pptx, skripta za gradnjo pa bi jo bilo treba na novo napisati.
+Zgrajen z `pptxgenjs` (Node) prek ene same skripte, ki NI shranjena v repozitoriju — obstajala je le začasno v seji, ki je datoteko generirala, samo izhodna `.pptx` je trajna. Zato jo je treba pri vsaki naslednji spremembi na novo napisati (ali obnoviti iz opisa spodaj), ni je mogoče urediti in samo ponovno pognati.
+
+**Trenutna, poenostavljena različica (2026-08-31, po izrecni prošnji "čim bolj poenostavi"): 10 prosojnic**, ena predloga na prosojnico (kicker + naslov + tanka črta + alineje ALI 2×2 mreža slik) — brez diagramov, ikonskih kartic, "journey" trakov ali statističnih škatel, ki jih je imela prva (13-prosojnična) različica. Vsebinsko še vedno sledi petim kriterijem iz `final-app/README.md` ("Kriteriji za končno predstavitev"), le stisnjeno: problem+ciljna skupina na eno prosojnico, VR rešitev na dve (rešitev + upravljanje), demo posnetki na eno prosojnico namesto dveh (mreža 4 slik: `01-ground`, `03-climbing`, `05-shaft`, `06-plume`). Uporablja isto temno paleto barv kot `tes-sostanj.html` (`--ink`/`--ember` ipd. iz CSS).
+
+Vsaka prosojnica ima v opombah (`addNotes`) enak govorni odstavek kot v spremljajoči `Vzpon - govor za predstavitev.txt` — če se ena spremeni, mora druga slediti (ni samodejno sinhronizirano).
 
 ## `tes-sostanj.html` — kako deluje
 
