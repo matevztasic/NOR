@@ -1,0 +1,3 @@
+# Installers / large binaries that don't belong in the repo
+*.exe
+*.msi

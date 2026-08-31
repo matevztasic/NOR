@@ -329,7 +329,7 @@
   <section>
     <p class="eyebrow">VR rešitev</p>
     <h3>Vzpon skozi čas</h3>
-    <p>Uporabnik pleza po zunanji konstrukciji elektrarne. Ob kontrolnih točkah se odpre zgodovina gradnje in razvoja TEŠ, na vrhu pa ga čaka razgled na Šaleško dolino in naraven učinek vrtoglavice ob robu.</p>
+    <p>Uporabnik pleza po zunanji konstrukciji elektrarne. Ob kontrolnih točkah se odpre zgodovina gradnje in razvoja TEŠ, na vrhu pa stopi na galerijo okoli <strong>odprtega žrela hladilnega stolpa</strong> — hodi lahko po obroču, gleda navzdol v jašek, iz katerega se dviga vodna para, in uživa razgled na Šaleško dolino z naravnim učinkom vrtoglavice ob obeh robovih.</p>
   </section>
 
   <section>
@@ -381,7 +381,10 @@
   var closeInfo = document.getElementById('closeInfo');
   var backdrop = document.getElementById('backdrop');
 
-  infoToggle.addEventListener('click', function(){ infoPanel.classList.add('open'); backdrop.classList.add('open'); });
+  infoToggle.addEventListener('click', function(){
+    infoPanel.classList.add('open'); backdrop.classList.add('open');
+    if (document.pointerLockElement) document.exitPointerLock();
+  });
   closeInfo.addEventListener('click', function(){ infoPanel.classList.remove('open'); backdrop.classList.remove('open'); });
   backdrop.addEventListener('click', function(){ infoPanel.classList.remove('open'); backdrop.classList.remove('open'); });
 
@@ -397,24 +400,113 @@
   // Sun position (true 3D point, used both for the rendered sun disc and for lighting direction).
   var SUN_WORLD = { x: 240, y: 150, z: TOWER.z - 90 };
   var LIGHT_DIR = norm({ x: SUN_WORLD.x - TOWER.x, y: SUN_WORLD.y - TOWER.height*0.4, z: SUN_WORLD.z - TOWER.z });
+
+  // Two-term lighting instead of a single sun dot-product:
+  //   direct  - the sun's own contribution (hard, directional)
+  //   ambient - a hemispheric sky term: surfaces facing UP catch open sky, surfaces facing
+  //             DOWN only catch dull bounce off the ground. This is what stops flat-shaded
+  //             polygons from reading as evenly-lit cardboard - a roof and a shaded wall now
+  //             differ even when neither faces the sun.
   function shadeForNormal(n){
-    var d = Math.max(0, dot(n, LIGHT_DIR));
-    return clamp(0.38 + d*0.85, 0.3, 1.28);
+    var direct = Math.max(0, dot(n, LIGHT_DIR));
+    var hemi = 0.5 + 0.5 * n.y;              // 1 = straight up, 0 = straight down
+    // The ambient floor has to stay fairly high: on an overcast-to-hazy afternoon a surface
+    // turned away from the sun is still lit by the whole sky dome, so it never goes near
+    // black. Too low a floor here is what made the tower render as a black silhouette.
+    return clamp(0.40 + hemi*0.24 + direct*0.66, 0.38, 1.28);
+  }
+  // How much of the sky's own colour bleeds into a surface. Up-facing surfaces pick up a
+  // cool blue cast, down-facing ones stay neutral - cheap stand-in for real sky lighting.
+  function skyMixForNormal(n){
+    return clamp(0.06 + Math.max(0, n.y) * 0.26, 0, 0.34);
   }
 
-  // Realistic hyperboloid cooling-tower silhouette: ring radii at height fractions.
-  // Kept subtle (max 7.0) so the ladder can hug the surface without a large visual gap.
-  var TOWER_VIS = {
-    x: TOWER.x, z: TOWER.z, height: TOWER.height,
-    rings: [ {t:0,r:7.0}, {t:0.16,r:6.5}, {t:0.34,r:6.15}, {t:0.5,r:6.05}, {t:0.68,r:6.2}, {t:0.85,r:6.5}, {t:1,r:6.9} ]
-  };
-  var TOWER_FACES = [];
-  (function buildTowerFaces(){
-    var SEG = 20;
+  // True hyperboloid cooling-tower profile, generated rather than hand-listed:
+  //   r(t) = sqrt(rThroat^2 + (k*(t - tThroat))^2)
+  // which is the actual curve a real cooling tower's shell follows (a hyperbola of one
+  // sheet). More rings + more segments than before, because the tower is the hero object
+  // and its silhouette was visibly faceted at 20 segments.
+  var TOWER_SEG = 28;
+  var TOWER_VIS = (function(){
+    // rThroat/k chosen so the widest ring (the base) lands on 7.0 - it must stay inside
+    // TOWER.halfW (7.6) or the player can climb into the shell, and the waist must not pinch
+    // so far in that the ladder floats visibly off the wall at mid-height.
+    // A more pronounced waist than before (5.4 at the throat against 7.0 at the base). The
+    // earlier, gentler curve made the tower read as a plain cylinder from any distance, which
+    // loses the one silhouette everyone recognises. This is only possible because the ladder
+    // now follows the shell curve (see towerRadiusAt) instead of hanging at a fixed distance -
+    // with a fixed ladder, a waist this deep left it floating metres off the wall at mid-height.
+    var rThroat = 5.4, tThroat = 0.72, k = 6.34, RINGS = 10;
+    var rings = [];
+    for (var i = 0; i < RINGS; i++){
+      var t = i / (RINGS - 1);
+      var d = k * (t - tThroat);
+      rings.push({ t: t, r: Math.sqrt(rThroat*rThroat + d*d) });
+    }
+    return { x: TOWER.x, z: TOWER.z, height: TOWER.height, rings: rings };
+  })();
+
+  // A natural-draft cooling tower is HOLLOW - the shell is barely 18 cm thick on the real
+  // TEŠ 6 tower and the top is an open mouth that the steam plume rises out of. Modelling the
+  // top as a solid disc was simply wrong, and it also made standing up there dull: a flat grey
+  // field with nothing to look at. Now the player walks a gallery round the rim and can look
+  // straight down the shaft. The gallery is wider than a real maintenance catwalk purely so
+  // there is somewhere to walk.
+  var TOWER_RIM_R  = TOWER_VIS.rings[TOWER_VIS.rings.length-1].r;
+  var TOWER_HOLE_R = TOWER_RIM_R - 3.0;
+
+  // Shell radius at an arbitrary height, interpolated between the ring definitions. The
+  // ladder, the climbing holds and the player's own position while climbing all read from
+  // this, so everything hugs the curved shell instead of hanging at one fixed distance.
+  function towerRadiusAt(y){
     var rings = TOWER_VIS.rings;
+    var t = clamp(y / TOWER_VIS.height, 0, 1);
+    for (var i = 0; i < rings.length - 1; i++){
+      if (t >= rings[i].t && t <= rings[i+1].t){
+        var f = (t - rings[i].t) / (rings[i+1].t - rings[i].t);
+        return lerp(rings[i].r, rings[i+1].r, f);
+      }
+    }
+    return rings[rings.length-1].r;
+  }
+  // point on the ladder: x across the ladder's width, y up, z pushed just clear of the shell
+  function ladderPoint(x, y, clearance){
+    return { x: x, y: y, z: TOWER.z - towerRadiusAt(y) - (clearance === undefined ? 0.12 : clearance) };
+  }
+  var TOWER_FACES = [];
+  var TOWER_INNER_FACES = [];
+  (function buildTowerFaces(){
+    var SEG = TOWER_SEG;
+    var rings = TOWER_VIS.rings;
+
+    // Vertical runoff staining. On a real cooling tower this is the single most recognisable
+    // surface feature: rain and condensate run down the shell and leave long dark streaks,
+    // so the concrete is never an even grey. The value is picked PER COLUMN and reused for
+    // every ring in that column, which is what makes the stain read as one continuous streak
+    // running the full height rather than as random per-quad noise.
+    // Staining as a CONTINUOUS function of the angle round the shell, sampled at each quad's
+    // two vertical edges and folded into that edge's shade value (below). Holding it constant
+    // per quad instead - as a tint on the face colour - was what still left hard vertical
+    // seams: neighbouring quads then meet at two different colours no matter how carefully
+    // the lighting is interpolated. Sampling per edge makes both sides of every shared edge
+    // agree exactly, so the streaks fade across the surface instead of stepping.
+    function streakAt(ang){
+      var w1 = 0.5 + 0.5*Math.sin(ang*7 + 1.3);
+      var w2 = 0.5 + 0.5*Math.sin(ang*13 + 4.1);
+      return 1 - 0.075*w1*w1 - 0.03*w2;
+    }
+
     for (var i = 0; i < rings.length - 1; i++){
       var y0 = rings[i].t * TOWER_VIS.height, y1 = rings[i+1].t * TOWER_VIS.height;
       var r0 = rings[i].r, r1 = rings[i+1].r;
+      // concrete cooling towers are poured in horizontal lifts and the seams stay visible -
+      // a faint per-ring tone step reads as exactly that, and gives the eye a height scale
+      // kept to a fraction of a percent - at the original +-5% each lift boundary showed up
+      // as a hard horizontal line straight across the tower
+      var band = 0.997 + 0.005 * pseudoRandom(i * 3.71);
+      // ambient occlusion at the foot of the tower: light can't reach the ground/shell
+      // junction, so the bottom of the shell is genuinely darker. Fades out by a quarter height.
+      var ao = 0.82 + 0.18 * Math.min(1, rings[i].t * 4);
       for (var j = 0; j < SEG; j++){
         var a0 = (j / SEG) * Math.PI*2, a1 = ((j+1) / SEG) * Math.PI*2;
         var v00 = { x: TOWER_VIS.x + r0*Math.cos(a0), y:y0, z: TOWER_VIS.z + r0*Math.sin(a0) };
@@ -428,73 +520,222 @@
         var outward = { x: Math.cos(amid), y:0, z: Math.sin(amid) };
         if (dot(n, outward) < 0) n = { x:-n.x, y:-n.y, z:-n.z };
         var center = { x:(v00.x+v01.x+v11.x+v10.x)/4, y:(y0+y1)/2, z:(v00.z+v01.z+v11.z+v10.z)/4 };
-        TOWER_FACES.push({ normal:n, verts:[v00,v01,v11,v10], center:center, color:[96,101,106], shade:shadeForNormal(n) });
+        // No independent per-quad random here on purpose. Any value that differs between
+        // neighbouring columns puts a hard vertical seam down the shell (adjacent quads then
+        // meet at two different colours), which defeats the whole point of the smooth
+        // edge-shading above. All the variation comes from `streak`, which is continuous
+        // around the circumference, and `band`/`ao`, which vary only with height.
+        var panel = band * ao;
+        // stained concrete also shifts slightly warm/brown rather than just getting darker,
+        // so the red channel falls off least - a purely neutral darkening looks like shadow
+        var col = [ clamp(170*panel*1.01,0,255), clamp(169*panel,0,255), clamp(163*panel*0.99,0,255) ];
+        // shadeL/shadeR are the shade values at the quad's LEFT and RIGHT edges, computed
+        // from the true surface normal at those exact angles rather than from the flat face
+        // normal. The renderer interpolates between them across the quad, so neighbouring
+        // facets meet at identical values and the shell reads as a smooth curve. Without
+        // this, standing next to the tower shows it as a set of flat vertical panels.
+        var hs = Math.sqrt(Math.max(0, 1 - n.y*n.y));
+        var nA = { x: Math.cos(a0)*hs, y: n.y, z: Math.sin(a0)*hs };
+        var nB = { x: Math.cos(a1)*hs, y: n.y, z: Math.sin(a1)*hs };
+        // noEdge: the shell is one continuous curved surface, so outlining each quad would
+        // draw a wireframe over it and make the faceting obvious - the exact opposite of
+        // what the extra segments are for. (It also removes ~130 stroke calls per frame.)
+        TOWER_FACES.push({ normal:n, verts:[v00,v01,v11,v10], center:center, color:col, noEdge:true,
+                           shade:shadeForNormal(n) * streakAt(amid), skyMix:skyMixForNormal(n),
+                           shadeL:shadeForNormal(nA) * streakAt(a0),
+                           shadeR:shadeForNormal(nB) * streakAt(a1) });
       }
     }
-    // top cap (walkable platform surface)
-    var topR = rings[rings.length-1].r, topY = TOWER_VIS.height;
-    var capVerts = [];
-    for (var k = 0; k < SEG; k++){
-      var ak = (k/SEG)*Math.PI*2;
-      capVerts.push({ x: TOWER_VIS.x + topR*Math.cos(ak), y:topY, z: TOWER_VIS.z + topR*Math.sin(ak) });
+    // Rim gallery: an ANNULUS (walkable ring), built as a strip of quads so it runs through
+    // the same backface-cull / depth-sort / shading pipeline as every other surface.
+    var topY = TOWER_VIS.height;
+    var upN = { x:0, y:1, z:0 };
+    for (var k2 = 0; k2 < SEG; k2++){
+      var b0 = (k2/SEG)*Math.PI*2, b1 = ((k2+1)/SEG)*Math.PI*2;
+      var o0 = { x:TOWER_VIS.x + TOWER_RIM_R*Math.cos(b0),  y:topY, z:TOWER_VIS.z + TOWER_RIM_R*Math.sin(b0) };
+      var o1 = { x:TOWER_VIS.x + TOWER_RIM_R*Math.cos(b1),  y:topY, z:TOWER_VIS.z + TOWER_RIM_R*Math.sin(b1) };
+      var i1 = { x:TOWER_VIS.x + TOWER_HOLE_R*Math.cos(b1), y:topY, z:TOWER_VIS.z + TOWER_HOLE_R*Math.sin(b1) };
+      var i0 = { x:TOWER_VIS.x + TOWER_HOLE_R*Math.cos(b0), y:topY, z:TOWER_VIS.z + TOWER_HOLE_R*Math.sin(b0) };
+      TOWER_FACES.push({ normal:upN, verts:[o0,o1,i1,i0],
+        center:{ x:(o0.x+i1.x)/2, y:topY, z:(o0.z+i1.z)/2 },
+        color:[150,150,145], noEdge:true,
+        shade:shadeForNormal(upN), skyMix:skyMixForNormal(upN) });
     }
-    var capNormal = {x:0,y:1,z:0};
-    TOWER_FACES.push({ normal:capNormal, verts:capVerts, center:{x:TOWER_VIS.x,y:topY,z:TOWER_VIS.z}, color:[112,118,122], shade:shadeForNormal(capNormal) });
+
+    // Inside of the shell, seen across the opening. Normals point INWARD (toward the axis),
+    // so backface culling shows only the FAR wall of the shaft and hides the near one - which
+    // is exactly what you see when you look down into a real tower. No sky reaches down
+    // there, so the shade falls off steeply with depth into near-darkness.
+    var INNER_RINGS = 4, INNER_DEPTH = 17;
+    for (var d = 0; d < INNER_RINGS; d++){
+      var yA = topY - (d/INNER_RINGS)*INNER_DEPTH;
+      var yB = topY - ((d+1)/INNER_RINGS)*INNER_DEPTH;
+      var innerShade = Math.max(0.10, 0.50 - d*0.12);
+      for (var m = 0; m < SEG; m++){
+        var c0 = (m/SEG)*Math.PI*2, c1 = ((m+1)/SEG)*Math.PI*2;
+        var w00 = { x:TOWER_VIS.x + TOWER_HOLE_R*Math.cos(c0), y:yA, z:TOWER_VIS.z + TOWER_HOLE_R*Math.sin(c0) };
+        var w01 = { x:TOWER_VIS.x + TOWER_HOLE_R*Math.cos(c1), y:yA, z:TOWER_VIS.z + TOWER_HOLE_R*Math.sin(c1) };
+        var w11 = { x:TOWER_VIS.x + TOWER_HOLE_R*Math.cos(c1), y:yB, z:TOWER_VIS.z + TOWER_HOLE_R*Math.sin(c1) };
+        var w10 = { x:TOWER_VIS.x + TOWER_HOLE_R*Math.cos(c0), y:yB, z:TOWER_VIS.z + TOWER_HOLE_R*Math.sin(c0) };
+        var cm = (c0+c1)/2;
+        var inwardN = { x:-Math.cos(cm), y:0, z:-Math.sin(cm) };
+        // kept in their own array: the inside of the shaft is only ever visible once the
+        // player is up on the rim, so from the ground and the whole climb these ~112 faces
+        // (plus their seam strokes) can be skipped entirely rather than culled one by one
+        TOWER_INNER_FACES.push({ normal:inwardN, verts:[w00,w01,w11,w10],
+          center:{ x:(w00.x+w11.x)/2, y:(yA+yB)/2, z:(w00.z+w11.z)/2 },
+          color:[150,148,143], noEdge:true, shade:innerShade, skyMix:0,
+          shadeL:innerShade, shadeR:innerShade });
+      }
+    }
   })();
 
+  // A building is four walls plus either a flat roof (industrial sheds, the plant itself) or
+  // a PITCHED gable roof (box.roofH > 0). The pitched option exists because a steep tiled
+  // gable roof is the single most recognisable feature of a Slovenian valley town - a skyline
+  // of flat-topped boxes reads as an anonymous industrial estate no matter what colour it is.
   function buildAuxFaces(box, colorRGB, seed){
     var xMin = box.x - box.halfW, xMax = box.x + box.halfW;
     var zMin = box.z - box.halfD, zMax = box.z + box.halfD;
     var yBase = box.base || 0;
     var yTop = yBase + box.height;
     var defs = [
-      { normal:{x:0,y:1,z:0}, isWall:false, verts:[{x:xMin,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMax},{x:xMin,y:yTop,z:zMax}] },
       { normal:{x:0,y:0,z:-1}, isWall:true, verts:[{x:xMin,y:yBase,z:zMin},{x:xMax,y:yBase,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMin}] },
       { normal:{x:0,y:0,z:1}, isWall:true, verts:[{x:xMax,y:yBase,z:zMax},{x:xMin,y:yBase,z:zMax},{x:xMin,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMax}] },
       { normal:{x:-1,y:0,z:0}, isWall:true, verts:[{x:xMin,y:yBase,z:zMax},{x:xMin,y:yBase,z:zMin},{x:xMin,y:yTop,z:zMin},{x:xMin,y:yTop,z:zMax}] },
       { normal:{x:1,y:0,z:0}, isWall:true, verts:[{x:xMax,y:yBase,z:zMin},{x:xMax,y:yBase,z:zMax},{x:xMax,y:yTop,z:zMax},{x:xMax,y:yTop,z:zMin}] }
     ];
+
+    var roofH = box.roofH || 0;
+    var roofCol = box.roofColor || [150,66,44];
+    if (roofH <= 0){
+      defs.push({ normal:{x:0,y:1,z:0}, isWall:false,
+        verts:[{x:xMin,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMax},{x:xMin,y:yTop,z:zMax}] });
+    } else if (box.halfW >= box.halfD){
+      // ridge runs along X: slopes face -z / +z, gable triangles cap the ends
+      var ry = yTop + roofH;
+      var rA = {x:xMin, y:ry, z:box.z}, rB = {x:xMax, y:ry, z:box.z};
+      defs.push({ normal:norm({x:0,y:box.halfD,z:-roofH}), isWall:false, roof:true,
+        verts:[{x:xMin,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMin},rB,rA] });
+      defs.push({ normal:norm({x:0,y:box.halfD,z:roofH}), isWall:false, roof:true,
+        verts:[{x:xMax,y:yTop,z:zMax},{x:xMin,y:yTop,z:zMax},rA,rB] });
+      defs.push({ normal:{x:-1,y:0,z:0}, isWall:false, verts:[{x:xMin,y:yTop,z:zMax},{x:xMin,y:yTop,z:zMin},rA] });
+      defs.push({ normal:{x:1,y:0,z:0}, isWall:false, verts:[{x:xMax,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMax},rB] });
+    } else {
+      // ridge runs along Z
+      var ry2 = yTop + roofH;
+      var rC = {x:box.x, y:ry2, z:zMin}, rD = {x:box.x, y:ry2, z:zMax};
+      defs.push({ normal:norm({x:-roofH,y:box.halfW,z:0}), isWall:false, roof:true,
+        verts:[{x:xMin,y:yTop,z:zMax},{x:xMin,y:yTop,z:zMin},rC,rD] });
+      defs.push({ normal:norm({x:roofH,y:box.halfW,z:0}), isWall:false, roof:true,
+        verts:[{x:xMax,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMax},rD,rC] });
+      defs.push({ normal:{x:0,y:0,z:-1}, isWall:false, verts:[{x:xMin,y:yTop,z:zMin},{x:xMax,y:yTop,z:zMin},rC] });
+      defs.push({ normal:{x:0,y:0,z:1}, isWall:false, verts:[{x:xMax,y:yTop,z:zMax},{x:xMin,y:yTop,z:zMax},rD] });
+    }
+
     return defs.map(function(f, i){
-      f.color = colorRGB; f.center = {x:box.x,y:(yBase+yTop)*0.5,z:box.z}; f.shade = shadeForNormal(f.normal);
+      f.color = f.roof ? roofCol : colorRGB;
+      f.center = {x:box.x, y:(yBase+yTop)*0.5, z:box.z};
+      f.shade = shadeForNormal(f.normal);
+      f.skyMix = skyMixForNormal(f.normal);
       f.seed = (seed||0)*29 + i*11;
       return f;
     });
   }
 
+  // Palettes for the two kinds of building in the valley. Close to the tower everything is
+  // plant infrastructure: grey concrete and steel, flat roofs. Further out is Šoštanj itself -
+  // pale stucco walls under steep terracotta tile, which is what the Šalek valley actually
+  // looks like from above.
+  var TILE_ROOFS  = [ [158,76,50], [138,62,42], [172,90,60], [124,58,44] ];
+  var HOUSE_WALLS = [ [238,232,218], [228,216,194], [222,206,172], [234,224,196], [210,200,186] ];
+  var PLANT_WALLS = [ [136,142,146], [116,124,130], [148,148,142], [104,112,118] ];
+
   var AUX_BUILDINGS = [
-    { x:-15, z:22, halfW:3.2, halfD:3.2, height:11, color:[80,92,102] },
-    { x:17,  z:27, halfW:2.4, halfD:2.4, height:7,  color:[122,84,58]  },
-    { x:-9,  z:34, halfW:2,   halfD:2,   height:16, color:[70,80,90]  },
-    { x:-24, z:44, halfW:5.5, halfD:3.6, height:9,  color:[95,88,80]  },
-    { x:22,  z:52, halfW:2.8, halfD:2.8, height:13, color:[88,96,100] },
-    { x:-6,  z:56, halfW:1.6, halfD:1.6, height:6,  color:[132,96,64] }
+    // plant buildings, hard up against the cooling tower - flat roofed, industrial grey
+    { x:-15, z:22, halfW:3.2, halfD:3.2, height:11, color:[120,128,134] },
+    { x:-9,  z:34, halfW:2,   halfD:2,   height:16, color:[110,118,124] },
+    { x:-24, z:44, halfW:5.5, halfD:3.6, height:9,  color:[138,138,132] },
+    { x:22,  z:52, halfW:2.8, halfD:2.8, height:13, color:[126,134,140] },
+    // first houses of the town, already pitched and tiled
+    { x:17,  z:27, halfW:2.4, halfD:3.4, height:6.5, color:[232,224,206], roofH:2.4, roofColor:[152,72,48] },
+    { x:-6,  z:56, halfW:1.8, halfD:2.6, height:5.5, color:[226,212,186], roofH:2.1, roofColor:[136,62,42] }
   ];
-  // extra buildings scattered around the complex, kept clear of the tower and chimney
+
+  // Parish church: a tall narrow bell tower with a spire beside a nave. Every Slovenian town
+  // has one and it is the landmark that makes a skyline read as a village rather than as an
+  // industrial park, so it is placed deliberately rather than left to the random scatter.
+  // The power station itself. On photographs of TEŠ the cooling tower never stands alone -
+  // it sits against a long grey mass of boiler house and turbine hall, with the chimney
+  // beyond. Without these the tower reads as a lone monument in a field rather than as one
+  // piece of a working plant.
+  AUX_BUILDINGS.push(
+    { x:-26, z:16, halfW:5, halfD:10, height:27, color:[128,134,138] },  // boiler house
+    { x:-26, z:34, halfW:5, halfD:8,  height:14, color:[140,144,146] },  // turbine hall
+    { x:-15, z:8,  halfW:3, halfD:3,  height:19, color:[116,122,126] }   // flue-gas plant
+  );
+
+  // declared up here (not next to its own buildings further down) because the scatter pass
+  // below needs to keep clear of it
+  var GAS_STATION = { x:14, z:48 };
+
+  var CHURCH = { x:-33, z:64 };
+  AUX_BUILDINGS.push(
+    { x:CHURCH.x, z:CHURCH.z, halfW:3.6, halfD:6.5, height:7, color:[240,236,226], roofH:3.0, roofColor:[144,66,46] },
+    { x:CHURCH.x, z:CHURCH.z-8, halfW:1.8, halfD:1.8, height:17, color:[242,238,228], roofH:5.0, roofColor:[92,96,102] }
+  );
+  // The rest of the settlement. Distance from the cooling tower decides the character:
+  // within ~34 units it is still the power station (grey, flat roofed, tall), beyond that it
+  // becomes the town - lower, pitched, tiled, and never grey.
   (function addMoreBuildings(){
-    for (var i = 0; i < 10; i++){
+    for (var i = 0; i < 26; i++){
       var seed = 200 + i*4.3;
       var ang = pseudoRandom(seed) * Math.PI*2;
-      var dist = 26 + pseudoRandom(seed+1) * 62;
+      var dist = 24 + pseudoRandom(seed+1) * 76;
       var bx = TOWER.x + Math.cos(ang)*dist;
       var bz = TOWER.z + Math.sin(ang)*dist;
-      if (Math.hypot(bx-36, bz-40) < 9) continue; // keep clear of the chimney
-      var hw = 1.6 + pseudoRandom(seed+2)*3.2;
-      var hd = 1.6 + pseudoRandom(seed+3)*3.2;
-      var h = 5 + pseudoRandom(seed+4)*14;
-      var toneSeed = pseudoRandom(seed+5);
-      var color = toneSeed < 0.33 ? [92,84,76] : (toneSeed < 0.66 ? [78,90,100] : [110,78,56]);
-      AUX_BUILDINGS.push({ x:bx, z:bz, halfW:hw, halfD:hd, height:h, color:color });
+      if (Math.hypot(bx-36, bz-40) < 9) continue;                    // keep clear of the chimney
+      if (Math.hypot(bx-CHURCH.x, bz-CHURCH.z) < 12) continue;       // keep the church its square
+      if (Math.hypot(bx-GAS_STATION.x, bz-GAS_STATION.z) < 10) continue;
+
+      if (dist < 34){
+        AUX_BUILDINGS.push({
+          x:bx, z:bz,
+          halfW: 2 + pseudoRandom(seed+2)*3.4,
+          halfD: 2 + pseudoRandom(seed+3)*3.4,
+          height: 7 + pseudoRandom(seed+4)*12,
+          color: PLANT_WALLS[Math.floor(pseudoRandom(seed+5)*PLANT_WALLS.length)]
+        });
+      } else {
+        var hw = 1.9 + pseudoRandom(seed+2)*2.0;
+        var hd = 2.4 + pseudoRandom(seed+3)*2.6;
+        AUX_BUILDINGS.push({
+          x:bx, z:bz, halfW:hw, halfD:hd,
+          height: 4.5 + pseudoRandom(seed+4)*3.4,
+          color: HOUSE_WALLS[Math.floor(pseudoRandom(seed+5)*HOUSE_WALLS.length)],
+          roofH: Math.max(hw, hd) * (0.75 + pseudoRandom(seed+6)*0.35),
+          roofColor: TILE_ROOFS[Math.floor(pseudoRandom(seed+7)*TILE_ROOFS.length)]
+        });
+      }
     }
   })();
 
   // a small petrol station along the road - shop, canopy roof on poles, two pumps
-  var GAS_STATION = { x:14, z:48 };
   AUX_BUILDINGS.push(
     { x:GAS_STATION.x, z:GAS_STATION.z-4, halfW:2.2, halfD:1.8, height:3.4, color:[232,230,222] },
     { x:GAS_STATION.x, z:GAS_STATION.z+2, halfW:5, halfD:3.2, height:0.35, base:4.2, color:[196,48,42] },
     { x:GAS_STATION.x-1.6, z:GAS_STATION.z+2, halfW:0.35, halfD:0.35, height:1.3, color:[225,225,230] },
     { x:GAS_STATION.x+1.6, z:GAS_STATION.z+2, halfW:0.35, halfD:0.35, height:1.3, color:[225,225,230] }
   );
+
+  // Buildings never move, so their faces are built ONCE here rather than regenerated every
+  // frame. The old code called buildAuxFaces() inside the render loop, allocating five fresh
+  // face objects (each with four fresh vertex objects) per building per frame - roughly a
+  // thousand short-lived objects a frame purely for the garbage collector to clean up, which
+  // is exactly the kind of churn that shows up as periodic stutter.
+  var AUX_FACE_CACHE = AUX_BUILDINGS.map(function(b, bi){
+    return buildAuxFaces(b, b.color, bi+1);
+  });
 
   // power line pylons, receding toward the horizon for context/scale
   var PYLONS = [];
@@ -527,7 +768,12 @@
         var outward = { x:Math.cos(amid), y:0, z:Math.sin(amid) };
         if (dot(n, outward) < 0) n = { x:-n.x, y:-n.y, z:-n.z };
         var center = { x:(v00.x+v01.x+v11.x+v10.x)/4, y:(y0+y1)/2, z:(v00.z+v01.z+v11.z+v10.z)/4 };
-        CHIMNEY_FACES.push({ normal:n, verts:[v00,v01,v11,v10], center:center, color:bandColor, shade:shadeForNormal(n) });
+        var chs = Math.sqrt(Math.max(0, 1 - n.y*n.y));
+        var cnA = { x: Math.cos(a0)*chs, y: n.y, z: Math.sin(a0)*chs };
+        var cnB = { x: Math.cos(a1)*chs, y: n.y, z: Math.sin(a1)*chs };
+        CHIMNEY_FACES.push({ normal:n, verts:[v00,v01,v11,v10], center:center, color:bandColor, noEdge:true,
+                             shade:shadeForNormal(n), skyMix:skyMixForNormal(n),
+                             shadeL:shadeForNormal(cnA), shadeR:shadeForNormal(cnB) });
       }
     }
     var capR = CHIMNEY.topR, capVerts = [];
@@ -536,7 +782,8 @@
       capVerts.push({ x:CHIMNEY.x+capR*Math.cos(ak), y:CHIMNEY.height, z:CHIMNEY.z+capR*Math.sin(ak) });
     }
     var capN = {x:0,y:1,z:0};
-    CHIMNEY_FACES.push({ normal:capN, verts:capVerts, center:{x:CHIMNEY.x,y:CHIMNEY.height,z:CHIMNEY.z}, color:[40,40,42], shade:shadeForNormal(capN) });
+    CHIMNEY_FACES.push({ normal:capN, verts:capVerts, center:{x:CHIMNEY.x,y:CHIMNEY.height,z:CHIMNEY.z},
+                         color:[40,40,42], shade:shadeForNormal(capN), skyMix:skyMixForNormal(capN) });
   })();
 
   // trees scattered around the complex, kept clear of the tower footprint
@@ -547,7 +794,9 @@
       var tx = (pseudoRandom(seed) - 0.5) * 150;
       var tz = 8 + pseudoRandom(seed+1) * 140;
       if (Math.hypot(tx-TOWER.x, tz-TOWER.z) < 13) continue;
-      TREES.push({ x:tx, z:tz, h: 3.2+pseudoRandom(seed+2)*2.6 });
+      // v = which of the pre-rendered tree sprites to use; three shapes/tints instead of one
+      // identical stamp repeated 90 times, which is what made the forest read as wallpaper
+      TREES.push({ x:tx, z:tz, h: 3.2+pseudoRandom(seed+2)*2.6, v: Math.floor(pseudoRandom(seed+3)*3) });
     }
     // a proper forest patch off to one side, for a less "bare" surroundings
     for (var j = 0; j < 34; j++){
@@ -555,7 +804,7 @@
       var fx = -58 + pseudoRandom(fseed)*40;
       var fz = 62 + pseudoRandom(fseed+1)*56;
       if (Math.hypot(fx-TOWER.x, fz-TOWER.z) < 13) continue;
-      TREES.push({ x:fx, z:fz, h: 2.8+pseudoRandom(fseed+2)*3.2 });
+      TREES.push({ x:fx, z:fz, h: 2.8+pseudoRandom(fseed+2)*3.2, v: Math.floor(pseudoRandom(fseed+3)*3) });
     }
     // treeline ringing the lake shore (lake itself defined further down as LAKE, kept in
     // sync manually here since this runs before that declaration)
@@ -564,7 +813,8 @@
       var lseed = 600 + k*3.31;
       var ang = pseudoRandom(lseed) * Math.PI*2;
       var ringDist = lakeR + 4 + pseudoRandom(lseed+1) * 26;
-      TREES.push({ x: lakeX + Math.cos(ang)*ringDist, z: lakeZ + Math.sin(ang)*ringDist, h: 2.6+pseudoRandom(lseed+2)*3.4 });
+      TREES.push({ x: lakeX + Math.cos(ang)*ringDist, z: lakeZ + Math.sin(ang)*ringDist,
+                   h: 2.6+pseudoRandom(lseed+2)*3.4, v: Math.floor(pseudoRandom(lseed+3)*3) });
     }
   })();
 
@@ -579,8 +829,9 @@
 
   var HISTORY = [
     { at: 9,  year: '1955',      title: 'Začetek gradnje',   text: 'Ob premogovniku v Šaleški dolini se začne gradnja termoelektrarne.' },
-    { at: 21, year: '1956–1972', title: 'Rast zmogljivosti',  text: 'V treh desetletjih zraste šest proizvodnih enot, ki oskrbujejo vso regijo.' },
-    { at: 33, year: '2015',      title: 'Blok TEŠ 6',         text: 'Zažene se najsodobnejša in največja proizvodna enota v Sloveniji.' }
+    { at: 19, year: '1956–1972', title: 'Rast zmogljivosti', text: 'V treh desetletjih zraste šest proizvodnih enot, ki oskrbujejo vso regijo.' },
+    { at: 29, year: '230 m',     title: 'Dimnik bloka 5',    text: 'Dimnik petega bloka meri 230 metrov — v Sloveniji ga presega le dimnik TE Trbovlje.' },
+    { at: 38, year: '2015',      title: 'Blok TEŠ 6',        text: 'Hladilni stolp je visok 164 m, širok 100 m ob vznožju, stena pa je debela komaj 18 cm.' }
   ];
 
   function pseudoRandom(seed){
@@ -589,6 +840,14 @@
   }
   function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
   function lerp(a, b, t){ return a + (b - a) * t; }
+  // shortest signed distance from angle a to angle b, wrapped into [-PI, PI] - lets yaw
+  // smoothing always turn the short way round instead of spinning through a full circle
+  function angleDelta(a, b){
+    var d = (b - a) % (Math.PI*2);
+    if (d > Math.PI) d -= Math.PI*2;
+    if (d < -Math.PI) d += Math.PI*2;
+    return d;
+  }
 
   // ---------------- player state ----------------
   var player = {
@@ -606,30 +865,68 @@
   });
   window.addEventListener('keyup', function(e){ keys[e.code] = false; });
 
-  // Look control: cursor position on screen directly sets the view direction - no click,
-  // no pointer lock, no drag required. This needs no special browser permission and cannot
-  // silently fail the way Pointer Lock did, so it is the only look mechanism now.
-  var YAW_RANGE = Math.PI * 0.95;   // how far left/right the full screen width can look
-  var PITCH_RANGE = 1.1;            // how far up/down the full screen height can look
+  // Look control has two modes:
+  //  - "locked" (Pointer Lock): the OS cursor is captured inside the canvas, hidden, and
+  //    relative mouse deltas (movementX/Y) drive the view. This is what keeps the real
+  //    cursor from wandering onto a second monitor or down into the taskbar.
+  //  - "free" fallback: absolute cursor position on screen maps to view direction, exactly
+  //    like before. Used until the user clicks the canvas, and automatically resumed if
+  //    Pointer Lock isn't available or is exited (Esc / alt-tab) - so nothing ever breaks
+  //    silently the way the old always-on Pointer Lock attempt did.
+  // In both modes the raw input only ever updates a *target* angle; the actual camera
+  // angle eases toward that target every frame (see update()). That smoothing is what
+  // stops a fast mouse swipe from making the whole sky/cloud layer whip around instantly.
+  var YAW_RANGE = Math.PI * 0.95;   // how far left/right the full screen width can look (free mode)
+  var PITCH_RANGE = 1.1;            // how far up/down the full screen height can look (free mode)
+  var POINTER_SENS = 0.0022;        // radians per pixel of mouse movement (locked mode)
+  var lookTargetYaw = 0, lookTargetPitch = 0;
+  var pointerLockSupported = 'requestPointerLock' in canvas;
 
   window.addEventListener('mousemove', function(e){
+    if (document.pointerLockElement === canvas){
+      lookTargetYaw += (e.movementX || 0) * POINTER_SENS;
+      lookTargetPitch = clamp(lookTargetPitch - (e.movementY || 0) * POINTER_SENS, -1.25, 1.25);
+      return;
+    }
     var rect = canvas.getBoundingClientRect();
     var nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     var ny = ((e.clientY - rect.top) / rect.height) * 2 - 1;
     nx = clamp(nx, -1, 1); ny = clamp(ny, -1, 1);
-    player.yaw = nx * YAW_RANGE;
-    player.pitch = clamp(-ny * PITCH_RANGE, -1.25, 1.25);
+    lookTargetYaw = nx * YAW_RANGE;
+    lookTargetPitch = clamp(-ny * PITCH_RANGE, -1.25, 1.25);
   });
+
+  if (pointerLockSupported){
+    canvas.addEventListener('click', function(){
+      if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
+    });
+    document.addEventListener('pointerlockchange', function(){
+      canvas.classList.toggle('locked', document.pointerLockElement === canvas);
+      updateLookHint();
+    });
+    document.addEventListener('pointerlockerror', function(){
+      // stays in free-look fallback - no dead end, view control still works
+      updateLookHint();
+    });
+  }
 
   function updateLookHint(){
     var hint = document.getElementById('lookHint');
     if (!hint) return;
-    hint.textContent = 'premikaj miško za pogled';
+    if (document.pointerLockElement === canvas){
+      hint.textContent = 'miška zaklenjena za pogled · Esc za sprostitev';
+    } else if (pointerLockSupported){
+      hint.textContent = 'premikaj miško za pogled · klikni za zaklep miške';
+    } else {
+      hint.textContent = 'premikaj miško za pogled';
+    }
   }
+  updateLookHint();
 
   resetBtn.addEventListener('click', function(){
     player.x = 0; player.z = WALL_Z - 9; player.groundY = 0;
     player.yaw = 0; player.pitch = 0; player.phase = 'ground';
+    lookTargetYaw = 0; lookTargetPitch = 0;
     vertigo = 0; activeInfo = -1;
     infoCard.classList.remove('visible');
   });
@@ -680,6 +977,15 @@
 
   // ---------------- movement & collisions ----------------
   function update(dt){
+    // Ease the actual view angle toward the raw input target instead of snapping to it.
+    // A fast mouse swipe (or the cursor re-entering the window at a new spot) used to move
+    // player.yaw instantly, which made every yaw-driven layer - clouds, hills, lake - jump
+    // in the same frame. Frame-rate independent smoothing (rate-based, not a fixed lerp
+    // factor) removes that snap while still feeling responsive.
+    var lookT = 1 - Math.exp(-25 * dt);
+    player.yaw += angleDelta(player.yaw, lookTargetYaw) * lookT;
+    player.pitch += (lookTargetPitch - player.pitch) * lookT;
+
     var mf = 0, mr = 0;
     if (keys['KeyW'] || keys['ArrowUp']) mf += 1;
     if (keys['KeyS'] || keys['ArrowDown']) mf -= 1;
@@ -727,12 +1033,23 @@
       if (mr !== 0){
         player.x = clamp(player.x + mr*4*dt, TOWER.x - LADDER_HALF_X + 0.3, TOWER.x + LADDER_HALF_X - 0.3);
       }
+      // ride the shell inwards as it narrows toward the throat, then back out again - the
+      // climber stays the same arm's length from the concrete the whole way up
+      player.z = TOWER.z - towerRadiusAt(player.groundY) - 0.55;
       if (player.groundY <= 0){
         player.phase = 'ground';
         player.z = WALL_Z - 3;
       } else if (player.groundY >= TOWER.height){
         player.phase = 'top';
         player.groundY = TOWER.height;
+        // Step off the ladder into the MIDDLE of the gallery. Left where the climb ends, the
+        // player arrives standing on the outer lip, which instantly pins vertigo to maximum -
+        // so the reward for finishing the climb was a dark red shaking screen.
+        var dxT = player.x - TOWER.x, dzT = player.z - TOWER.z;
+        var dT = Math.hypot(dxT, dzT) || 1;
+        var midR = (TOWER_HOLE_R + TOWER_RIM_R) * 0.5;
+        player.x = TOWER.x + (dxT/dT)*midR;
+        player.z = TOWER.z + (dzT/dT)*midR;
       }
       updateHistoryCard();
     } else if (player.phase === 'top'){
@@ -742,21 +1059,35 @@
       var speed2 = 5.2 * sprint;
       var nx2 = player.x + dx2*speed2*dt;
       var nz2 = player.z + dz2*speed2*dt;
-      var topR = TOWER_VIS.rings[TOWER_VIS.rings.length-1].r - 0.7;
+      // The walkable area is now a RING, so the player is fenced in on both sides: the outer
+      // parapet and the open shaft in the middle.
+      var outerLimit = TOWER_RIM_R - 0.7;
+      var innerLimit = TOWER_HOLE_R + 0.5;
       var dcx2 = nx2 - TOWER.x, dcz2 = nz2 - TOWER.z;
       var dist2 = Math.hypot(dcx2, dcz2);
-      if (dist2 > topR){
-        var s2 = topR / dist2;
+      if (dist2 > outerLimit){
+        var s2 = outerLimit / Math.max(dist2, 0.001);
         nx2 = TOWER.x + dcx2*s2; nz2 = TOWER.z + dcz2*s2;
-        dist2 = topR;
+        dist2 = outerLimit;
+      } else if (dist2 < innerLimit){
+        var s3 = innerLimit / Math.max(dist2, 0.001);
+        nx2 = TOWER.x + dcx2*s3; nz2 = TOWER.z + dcz2*s3;
+        dist2 = innerLimit;
       }
       player.x = nx2; player.z = nz2;
-      var edgeDist = topR - dist2;
-      vertigo = clamp(1 - edgeDist / 1.6, 0, 1);
+      // vertigo from whichever edge is closer - looking down the shaft is at least as
+      // unnerving as looking off the outside
+      // 0.75, not the old 1.6: the gallery is only ~1.8 units wide, so a 1.6-unit falloff was
+      // wider than the entire walkway and left vertigo pinned high everywhere on it - the
+      // effect has to be able to switch OFF in the middle for it to mean anything at the edge.
+      var edgeDist = Math.min(outerLimit - dist2, dist2 - innerLimit);
+      vertigo = clamp(1 - edgeDist / 0.75, 0, 1);
     }
 
     var climbT = clamp(player.groundY / TOWER.height, 0, 1);
-    heightVal.textContent = Math.round(climbT * 180);
+    // 164 m is the real height of the TEŠ 6 cooling tower - the tallest energy structure in
+    // Slovenia - so the readout matches the actual building rather than a round made-up number
+    heightVal.textContent = Math.round(climbT * 164);
     progressFill.style.width = (climbT * 100) + '%';
 
     if (player.phase !== 'climbing') infoCard.classList.remove('visible');
@@ -842,18 +1173,94 @@
     octx.fillRect(0, 0, s, s);
   });
 
-  var TREE_SPRITE = makeSprite(64, function(octx, s){
-    octx.fillStyle = '#4a3324';
-    octx.fillRect(s*0.46, s*0.62, s*0.08, s*0.3);
-    octx.fillStyle = '#3a5c37';
-    octx.beginPath(); octx.ellipse(s*0.5, s*0.4, s*0.3, s*0.26, 0, 0, Math.PI*2); octx.fill();
-    octx.fillStyle = '#466a41';
-    octx.beginPath(); octx.ellipse(s*0.32, s*0.5, s*0.2, s*0.18, 0, 0, Math.PI*2); octx.fill();
-    octx.beginPath(); octx.ellipse(s*0.68, s*0.5, s*0.2, s*0.18, 0, 0, Math.PI*2); octx.fill();
+  // Three tree silhouettes instead of one repeated stamp. Each is lit from the upper right
+  // to match LIGHT_DIR (the sun sits at +x), so a whole hillside of them shades consistently
+  // with the buildings rather than looking like flat cut-outs pasted onto the scene.
+  function shadedBlob(octx, cx, cy, rx, ry, dark, light){
+    var g = octx.createRadialGradient(cx + rx*0.42, cy - ry*0.45, rx*0.1, cx, cy, rx*1.15);
+    g.addColorStop(0, light);
+    g.addColorStop(1, dark);
+    octx.fillStyle = g;
+    octx.beginPath(); octx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2); octx.fill();
+  }
+
+  var TREE_SPRITES = [
+    // 0 - broad deciduous crown
+    makeSprite(96, function(octx, s){
+      octx.fillStyle = '#4a3324';
+      octx.fillRect(s*0.46, s*0.60, s*0.08, s*0.32);
+      shadedBlob(octx, s*0.50, s*0.40, s*0.30, s*0.27, '#2c4a2b', '#6d9155');
+      shadedBlob(octx, s*0.33, s*0.51, s*0.19, s*0.17, '#2a4529', '#5c8049');
+      shadedBlob(octx, s*0.68, s*0.50, s*0.20, s*0.18, '#315230', '#74985c');
+    }),
+    // 1 - conifer / spruce, the dominant tree on Slovenian hillsides
+    makeSprite(96, function(octx, s){
+      octx.fillStyle = '#3d2c1f';
+      octx.fillRect(s*0.47, s*0.72, s*0.06, s*0.22);
+      var tiers = [ [0.30, 0.34], [0.48, 0.27], [0.64, 0.19] ];
+      tiers.forEach(function(t, i){
+        var g = octx.createLinearGradient(s*0.5 - s*t[1], 0, s*0.5 + s*t[1], 0);
+        g.addColorStop(0, '#20391f');
+        g.addColorStop(1, '#5a7c45');
+        octx.fillStyle = g;
+        octx.beginPath();
+        octx.moveTo(s*0.5, s*(t[0] - 0.20));
+        octx.lineTo(s*0.5 + s*t[1], s*(t[0] + 0.13));
+        octx.lineTo(s*0.5 - s*t[1], s*(t[0] + 0.13));
+        octx.closePath();
+        octx.fill();
+      });
+    }),
+    // 2 - taller, narrower deciduous (poplar-ish), breaks up the skyline
+    makeSprite(96, function(octx, s){
+      octx.fillStyle = '#4f3a28';
+      octx.fillRect(s*0.47, s*0.66, s*0.06, s*0.28);
+      shadedBlob(octx, s*0.50, s*0.34, s*0.21, s*0.30, '#2b4726', '#688a4e');
+      shadedBlob(octx, s*0.50, s*0.56, s*0.17, s*0.18, '#25401f', '#5b7c44');
+    })
+  ];
+
+  // Film grain tile. Flat-shaded polygons and smooth CSS-style gradients are "too clean" -
+  // there is no sensor noise anywhere, and the eye reads that as synthetic. A single 256px
+  // noise tile, blended in 'overlay' at very low alpha, breaks up every flat area and every
+  // gradient band at once. Built once; if the browser won't give us pixel access we simply
+  // skip grain rather than failing.
+  var GRAIN_TILE = (function(){
+    try {
+      var c = document.createElement('canvas');
+      c.width = 256; c.height = 256;
+      var o = c.getContext('2d');
+      if (!o || typeof o.createImageData !== 'function') return null;
+      var img = o.createImageData(256, 256);
+      var d = img.data;
+      for (var i = 0; i < d.length; i += 4){
+        var v = 128 + (Math.random() - 0.5) * 42;   // 128 is the no-op value for 'overlay'
+        d[i] = v; d[i+1] = v; d[i+2] = v; d[i+3] = 255;
+      }
+      o.putImageData(img, 0, 0);
+      return c;
+    } catch (e){ return null; }
+  })();
+
+  var GRASS_SPRITE = makeSprite(32, function(octx, s){
+    octx.strokeStyle = '#5d7a44';
+    octx.lineWidth = s*0.07;
+    octx.lineCap = 'round';
+    var blades = [ [-0.22,-0.34], [0,-0.46], [0.2,-0.36], [0.34,-0.2] ];
+    blades.forEach(function(b){
+      octx.beginPath();
+      octx.moveTo(s*0.5, s*0.92);
+      octx.quadraticCurveTo(s*(0.5+b[0]*0.5), s*(0.92+b[1]*0.55), s*(0.5+b[0]), s*(0.92+b[1]));
+      octx.stroke();
+    });
   });
 
-  var SKY_LOW = { top:[70,98,150], hor:[255,167,120] };
-  var SKY_HIGH = { top:[52,128,208], hor:[255,236,204] };
+  // Late-afternoon palette, deliberately desaturated compared to the original saturated
+  // orange: real skies almost never hit fully saturated channels, and a horizon pinned at
+  // 255 in the red channel is the main thing that made the scene read as a cartoon. Keeping
+  // the warmth but pulling the saturation down is what makes it look photographed.
+  var SKY_LOW = { top:[96,130,170], hor:[224,194,168] };
+  var SKY_HIGH = { top:[58,112,178], hor:[216,214,208] };
 
   function skyColors(){
     var t = clamp(player.groundY / TOWER.height, 0, 1);
@@ -886,11 +1293,21 @@
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, W, Math.max(hy, 0));
 
-    var groundNear = [66, 82, 58];
+    // Aerial perspective on the ground plane. The old version jumped from horizon haze
+    // straight to solid green within 10% of the screen and then only got darker, which reads
+    // as a flat painted backdrop. Real terrain fades through a hazy band before it resolves
+    // into ground colour, so the falloff now runs across several stops.
+    // Sunlit grass is much lighter and yellower than the near-black green this used to end on;
+    // the whole lower third of the frame was reading as a dark void.
+    var groundNear = [98, 124, 66];
+    var groundMid  = [80, 104, 56];
+    var groundHaze = [ lerp(sky.hor[0],126,0.40), lerp(sky.hor[1],134,0.40), lerp(sky.hor[2],108,0.40) ];
     var groundGrad = ctx.createLinearGradient(0, hy, 0, H);
-    groundGrad.addColorStop(0, rgbStr(sky.hor));
-    groundGrad.addColorStop(0.1, rgbStr(groundNear));
-    groundGrad.addColorStop(1, 'rgb(36,44,34)');
+    groundGrad.addColorStop(0,     rgbStr(sky.hor));
+    groundGrad.addColorStop(0.035, rgbStr(groundHaze));
+    groundGrad.addColorStop(0.14,  rgbStr(groundMid));
+    groundGrad.addColorStop(0.45,  rgbStr(groundNear));
+    groundGrad.addColorStop(1,     'rgb(86,108,58)');
     ctx.fillStyle = groundGrad;
     ctx.fillRect(0, Math.max(hy,0), W, H - Math.max(hy,0));
 
@@ -906,20 +1323,46 @@
       ctx.fill();
     }
 
-    // distant hill silhouette (parallax by yaw), two layers for depth
+    // Three ridge lines with real aerial perspective. Distance is conveyed by how close a
+    // ridge's colour sits to the horizon haze (far = washed out and blue-shifted, near =
+    // darker and greener), not just by making it fainter - that colour shift is what the eye
+    // actually uses to judge depth in a landscape. Each ridge also gets its own phase so
+    // they aren't three scaled copies of one silhouette.
     var offset = -(player.yaw * 220) % (W*2);
-    ctx.fillStyle = rgbaStr([Math.max(sky.hor[0]-75,18), Math.max(sky.hor[1]-65,26), Math.max(sky.hor[2]-55,28)], 0.32);
-    drawHillLayer(offset*0.7, hy, 42, 34);
-    ctx.fillStyle = rgbaStr([Math.max(sky.hor[0]-55,22), Math.max(sky.hor[1]-45,32), Math.max(sky.hor[2]-38,32)], 0.52);
-    drawHillLayer(offset, hy, 26, 20);
+    // The ridges around the Šalek valley are densely forested - spruce and beech right to the
+    // ridgeline - so they read as deep green, not as grey rock. Aerial perspective still
+    // washes them toward the horizon haze with distance, which is what separates the layers.
+    function ridgeColor(mix){
+      return [ lerp(sky.hor[0], 46, mix), lerp(sky.hor[1], 74, mix), lerp(sky.hor[2], 48, mix) ];
+    }
+    ctx.fillStyle = rgbaStr(ridgeColor(0.34), 0.58);
+    drawHillLayer(offset*0.55, hy, 54, 40, 0, 0);
+    ctx.fillStyle = rgbaStr(ridgeColor(0.60), 0.70);
+    drawHillLayer(offset*0.75, hy, 37, 27, 2100, 1.6);
+    ctx.fillStyle = rgbaStr(ridgeColor(0.84), 0.82);
+    drawHillLayer(offset, hy, 24, 18, 5300, 3.2);
 
-    drawClouds(hy);
-
+    // Ground features first, THEN the clouds. The cloud sea represents cloud lying below the
+    // player once they are high up, so it has to be able to hide the valley floor - drawing
+    // the lake and river after it meant they were painted on top of the cloud they should
+    // have been buried under.
     if (hy < H){
       drawLake();
       drawRiver(hy);
       drawGroundPatches(hy);
     }
+
+    drawClouds(hy, lastFrameTs);
+  }
+
+  // Low-lying valley mist, not a solid cloud deck. The Šalek valley genuinely holds mist in
+  // its bottom, but the whole point of climbing the tower is the VIEW - the previous version
+  // built to full opacity and buried the town, the lakes and the hills under a flat white
+  // sheet by the time you reached the top. Capped low so it reads as haze lying in the valley
+  // and the landscape stays visible through it.
+  function cloudSeaStrength(){
+    var t = clamp(player.groundY / TOWER.height, 0, 1);
+    return clamp((t - 0.45) / 0.55, 0, 1) * 0.34;
   }
 
   // ---------------- clouds & atmosphere ----------------
@@ -956,13 +1399,16 @@
     return ((raw % CLOUD_WRAP) + CLOUD_WRAP) % CLOUD_WRAP - CLOUD_WRAP/2 + W/2;
   }
 
-  function drawClouds(hy){
+  function drawClouds(hy, ts){
     var t = clamp(player.groundY / TOWER.height, 0, 1);
     var offset = -(player.yaw * 160);
+    // slow drift independent of where the camera is looking, so the sky stays alive
+    // (gently) even standing still, instead of only ever moving when the mouse does
+    var wind = (ts || 0) * 0.0025;
 
     // thin high cirrus streaks - pre-rendered sprite, just positioned/scaled/faded per frame
     CIRRUS.forEach(function(c){
-      var sx = wrapX(c.x + offset*c.parallax);
+      var sx = wrapX(c.x + offset*c.parallax + wind*c.parallax*0.6);
       if (sx < -c.len-40 || sx > W+c.len+40) return;
       var w = c.len*2, h = w*0.2;
       ctx.globalAlpha = c.alpha;
@@ -972,7 +1418,7 @@
 
     // puffy mid-sky clouds - same pre-rendered sprite, drawn many times (cheap)
     CLOUD_PUFFS.forEach(function(c){
-      var sx = wrapX(c.x + offset*c.parallax);
+      var sx = wrapX(c.x + offset*c.parallax + wind*c.parallax);
       if (sx < -150 || sx > W+150) return;
       var alpha = c.alpha * clamp(0.7 + t*0.4, 0, 1);
       var sz = 170 * c.scale;
@@ -981,28 +1427,56 @@
     });
     ctx.globalAlpha = 1;
 
-    // cloud sea near the horizon, thickens dramatically as the climb progresses ("above the clouds")
-    if (t > 0.28){
-      var seaAlpha = clamp((t-0.28)/0.5, 0, 1) * 0.94;
-      ctx.fillStyle = 'rgba(255,255,255,' + seaAlpha + ')';
+    // Cloud sea below the player, thickening as the climb progresses ("above the clouds").
+    // Previously a flat white polygon with a hard top edge, which read as a painted stripe
+    // across the horizon. Now the body fades in downward from its crest, and pre-rendered
+    // cloud puffs ride that crest so the upper surface is lumpy and soft instead of a cut line.
+    var seaStrength = cloudSeaStrength();
+    if (seaStrength > 0.001){
+      var crest = function(x){
+        return hy + 30 + 13*Math.sin((x+offset*0.3)*0.011) + 8*Math.sin((x+offset*0.5)*0.024);
+      };
+      // reaches near-full opacity quickly below the crest, otherwise distant ground features
+      // (the lake especially) stay visible straight through cloud they should be under
+      var g = ctx.createLinearGradient(0, hy + 14, 0, hy + 110);
+      g.addColorStop(0,    'rgba(255,255,255,0)');
+      g.addColorStop(0.30, 'rgba(252,252,255,' + (seaStrength*0.88) + ')');
+      g.addColorStop(1,    'rgba(247,249,252,' + (seaStrength*0.98) + ')');
+      ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.moveTo(-40, hy+34);
-      for (var x = -40; x <= W+40; x += 44){
-        var yy = hy + 34 + 12*Math.sin((x+offset*0.3)*0.011) + 7*Math.sin((x+offset*0.5)*0.024);
-        ctx.lineTo(x, yy);
-      }
-      ctx.lineTo(W+40, hy+130);
-      ctx.lineTo(-40, hy+130);
+      ctx.moveTo(-60, crest(-60));
+      for (var x = -60; x <= W+60; x += 38) ctx.lineTo(x, crest(x));
+      ctx.lineTo(W+60, H + 40);
+      ctx.lineTo(-60, H + 40);
       ctx.closePath();
       ctx.fill();
+
+      ctx.globalAlpha = seaStrength * 0.75;
+      for (var bx = -90; bx <= W+90; bx += 92){
+        var bsz = 200;
+        ctx.drawImage(CLOUD_SPRITE, bx - bsz/2, crest(bx) - bsz*0.60, bsz, bsz);
+      }
+      ctx.globalAlpha = 1;
     }
   }
 
-  function drawHillLayer(offset, hy, amp1, amp2){
+  function drawHillLayer(offset, hy, amp1, amp2, phase, rough){
+    var ph = phase || 0;
+    var rg = rough || 0;
+    var step = rg > 0 ? 14 : 34;   // fine steps only where the treetop detail is drawn
     ctx.beginPath();
     ctx.moveTo(-W + offset, hy);
-    for (var hx = -W; hx <= W*2; hx += 50){
-      var yy = hy - amp1 - amp1*0.5*Math.sin((hx+1000)*0.006) - amp2*0.5*Math.sin((hx+300)*0.017);
+    // 34px steps rather than 50: the ridgeline was visibly polygonal at the old spacing
+    for (var hx = -W; hx <= W*2; hx += step){
+      var yy = hy - amp1
+             - amp1*0.5*Math.sin((hx+ph+1000)*0.006)
+             - amp2*0.5*Math.sin((hx+ph+300)*0.017)
+             - amp2*0.22*Math.sin((hx+ph+750)*0.041);   // third octave = less regular skyline
+      // ragged high-frequency detail along the crest: individual conifers breaking the
+      // skyline, which is what stops a forested ridge reading as a smooth painted cut-out
+      if (rg > 0){
+        yy -= rg * (1.6 + Math.sin((hx+ph)*0.53) + 0.7*Math.sin((hx+ph)*1.27));
+      }
       ctx.lineTo(hx + offset, yy);
     }
     ctx.lineTo(W*2 + offset, hy + 40);
@@ -1016,11 +1490,11 @@
   function ensureGroundPatches(){
     if (GROUND_PATCHES) return GROUND_PATCHES;
     GROUND_PATCHES = [];
-    for (var i = 0; i < 22; i++){
+    for (var i = 0; i < 34; i++){
       var seed = i*7.31;
-      var gx = (pseudoRandom(seed) - 0.5) * 160;
-      var gz = 20 + pseudoRandom(seed+1) * 150;
-      var r = 8 + pseudoRandom(seed+2) * 14;
+      var gx = (pseudoRandom(seed) - 0.5) * 190;
+      var gz = 12 + pseudoRandom(seed+1) * 170;
+      var r = 7 + pseudoRandom(seed+2) * 17;
       var tone = pseudoRandom(seed+3);
       GROUND_PATCHES.push({ x:gx, z:gz, r:r, tone:tone });
     }
@@ -1036,10 +1510,12 @@
       var edgeProj = project(edgeCp);
       var screenR = edgeProj ? Math.abs(edgeProj.x - proj.x) : 0;
       if (screenR < 2 || screenR > W) return;
-      var tone = p.tone > 0.5 ? [88,100,60] : [58,72,48];
+      // three field tones rather than two, and strong enough to actually be seen - farmland
+      // around the plant is a patchwork of crops and meadow, not one flat green sheet
+      var tone = p.tone > 0.66 ? [128,132,80] : (p.tone > 0.33 ? [96,110,66] : [74,88,56]);
       ctx.beginPath();
       ctx.ellipse(proj.x, proj.y, screenR, screenR*0.34, 0, 0, Math.PI*2);
-      ctx.fillStyle = rgbaStr(tone, 0.28);
+      ctx.fillStyle = rgbaStr(tone, 0.40);
       ctx.fill();
     });
   }
@@ -1058,7 +1534,9 @@
     var sky = skyColors();
     ctx.beginPath();
     ctx.ellipse(proj.x, proj.y, screenR, screenR*0.4, 0, 0, Math.PI*2);
-    ctx.fillStyle = rgbaStr([ lerp(48,sky.hor[0],0.32), lerp(88,sky.hor[1],0.32), lerp(138,sky.hor[2],0.32) ], 0.62);
+    // Velenjsko jezero is a subsidence lake over old coal workings and reads distinctly
+    // turquoise, not the flat blue of open water
+    ctx.fillStyle = rgbaStr([ lerp(38,sky.hor[0],0.30), lerp(122,sky.hor[1],0.30), lerp(126,sky.hor[2],0.30) ], 0.70);
     ctx.fill();
     ctx.beginPath();
     ctx.ellipse(proj.x - screenR*0.15, proj.y - screenR*0.08, screenR*0.5, screenR*0.16, 0, 0, Math.PI*2);
@@ -1087,6 +1565,35 @@
     var sky = skyColors();
     ctx.fillStyle = rgbaStr([ lerp(60,sky.hor[0],0.4), lerp(90,sky.hor[1],0.4), lerp(130,sky.hor[2],0.4) ], 0.55);
     ctx.fill();
+  }
+
+  // Near-field grass tufts. The ground used to be a bare vertical gradient, which gave the
+  // eye nothing to track while walking - motion felt like the world sliding rather than the
+  // player moving. Tufts are placed on a fixed WORLD grid (cell indices derived from absolute
+  // coordinates, not from the camera), so they stay nailed to the ground instead of swimming
+  // along with the player, and only the cells near the camera are ever considered.
+  function drawGrassDetail(){
+    if (cam.pos.y > 14) return;   // too high up for ground detail to be visible at all
+    var cell = 1.7, range = 6;
+    var ci = Math.floor(cam.pos.x / cell), cj = Math.floor(cam.pos.z / cell);
+    for (var i = -range; i <= range; i++){
+      for (var j = -range; j <= range; j++){
+        var gi = ci + i, gj = cj + j;
+        var seed = gi*73.13 + gj*19.71;
+        var wx = (gi + 0.15 + pseudoRandom(seed)*0.7) * cell;
+        var wz = (gj + 0.15 + pseudoRandom(seed+1)*0.7) * cell;
+        var cp = toCamera({ x:wx, y:0, z:wz });
+        if (cp.z < 1.2 || cp.z > 18) continue;
+        var p = project(cp);
+        if (!p) continue;
+        // smaller and much fainter than the first attempt, where individual tufts read as
+        // scattered "V" marks stamped on the grass rather than as ground texture
+        var sz = clamp(64 / cp.z, 3, 22);
+        ctx.globalAlpha = clamp(1 - cp.z/18, 0, 1) * 0.30;
+        ctx.drawImage(GRASS_SPRITE, p.x - sz/2, p.y - sz, sz, sz);
+      }
+    }
+    ctx.globalAlpha = 1;
   }
 
   function drawRoad(){
@@ -1130,17 +1637,6 @@
     ctx.setLineDash([]);
   }
 
-  function drawGrid(){
-    ctx.strokeStyle = 'rgba(255,255,255,0.09)';
-    ctx.lineWidth = 1;
-    var range = 90, step = 6;
-    for (var gx = -range; gx <= range; gx += step){
-      drawWorldLine({x:gx,y:0,z:-range}, {x:gx,y:0,z:range});
-    }
-    for (var gz = -range; gz <= range; gz += step){
-      drawWorldLine({x:-range,y:0,z:gz}, {x:range,y:0,z:gz});
-    }
-  }
   function drawWorldLine(a, b){
     var ca = toCamera(a), cb = toCamera(b);
     if (ca.z < 0.05 && cb.z < 0.05) return;
@@ -1158,44 +1654,100 @@
     return { x: lerp(bad.x, good.x, t), y: lerp(bad.y, good.y, t), z: 0.05 };
   }
 
+  // Single depth-sorted pass over EVERYTHING solid in the scene - building/tower/chimney
+  // polygons AND tree billboards together. They used to be two separate passes (all trees,
+  // then all buildings), which meant a tree standing in front of a building was still
+  // painted first and so wrongly disappeared behind it. One shared sort fixes that.
+  // Full colour pipeline for one face at a given shade value: surface tint -> sky bleed on
+  // up-facing surfaces -> distance fog. Taking `shade` as a parameter (rather than always
+  // reading f.shade) is what lets a single face be filled with a gradient between the shade
+  // at its two vertical edges, which is how the faceted shells are smoothed out.
+  function faceColor(f, shade, fog, sky){
+    var out = [0, 0, 0];
+    var sm = f.skyMix || 0;
+    for (var i = 0; i < 3; i++){
+      var v = f.color[i] * shade;
+      v = lerp(v, sky.top[i] * 0.85, sm);
+      // 0.66 rather than 0.82: at the higher value even mid-distance buildings were more haze
+      // than building, and the whole valley bleached out to near-white
+      out[i] = lerp(v, sky.hor[i], fog * 0.66);
+    }
+    return out;
+  }
+
   function drawBuildings(){
-    var faces = TOWER_FACES.concat(CHIMNEY_FACES);
-    AUX_BUILDINGS.forEach(function(b, bi){
-      // cheap pre-filter: skip generating/testing faces for buildings that are far away
-      // or well behind the camera - saves real work before it ever reaches the sort/draw pass
+    var sky = skyColors();   // hoisted out of the per-face loop - it was recomputed hundreds
+                             // of times per frame for a value that only changes with height
+    var visible = [];
+
+    // Backface-cull, depth-measure and collect one array of faces into `visible`.
+    // Written as a plain loop over the source arrays instead of concat()-ing them into a
+    // combined array first: the old version rebuilt and copied a several-hundred-element
+    // array once per building, every frame, for no benefit.
+    function collect(list){
+      for (var i = 0; i < list.length; i++){
+        var f = list[i];
+        var toCamX = cam.pos.x - f.center.x, toCamY = cam.pos.y - f.center.y, toCamZ = cam.pos.z - f.center.z;
+        if (f.normal.x*toCamX + f.normal.y*toCamY + f.normal.z*toCamZ <= 0) continue;
+        var minZ = Infinity, sumZ = 0, behind = 0;
+        var camPts = [];
+        for (var v = 0; v < f.verts.length; v++){
+          var cp = toCamera(f.verts[v]);
+          camPts.push(cp);
+          sumZ += cp.z;
+          if (cp.z < 0.05) behind++;
+          if (cp.z < minZ) minZ = cp.z;
+        }
+        if (behind === f.verts.length) continue;
+        f.avgZ = sumZ / f.verts.length;
+        f.minZ = minZ;
+        f.sortZ = minZ;
+        f.camPts = camPts;
+        f.kind = 'face';
+        visible.push(f);
+      }
+    }
+
+    collect(TOWER_FACES);
+    // the shaft interior is walled off from view until the player is up on the rim
+    if (cam.pos.y > TOWER.height - 5) collect(TOWER_INNER_FACES);
+    collect(CHIMNEY_FACES);
+    for (var bi = 0; bi < AUX_BUILDINGS.length; bi++){
+      // cheap pre-filter: skip buildings that are far away or well behind the camera -
+      // saves real work before it ever reaches the sort/draw pass
+      var b = AUX_BUILDINGS[bi];
       var dx = b.x-cam.pos.x, dz = b.z-cam.pos.z;
       var dist = Math.hypot(dx, dz);
-      if (dist > 150) return;
-      if (dist > 0.01 && (dx/dist)*cam.forward.x + (dz/dist)*cam.forward.z < -0.3) return;
-      faces = faces.concat(buildAuxFaces(b, b.color, bi+1));
-    });
+      if (dist > 150) continue;
+      if (dist > 0.01 && (dx/dist)*cam.forward.x + (dz/dist)*cam.forward.z < -0.3) continue;
+      collect(AUX_FACE_CACHE[bi]);
+    }
 
-    var visible = [];
-    faces.forEach(function(f){
-      var toCam = { x: cam.pos.x - f.center.x, y: cam.pos.y - f.center.y, z: cam.pos.z - f.center.z };
-      if (dot(f.normal, toCam) <= 0) return;
-      var minZ = Infinity, sumZ = 0, behind = 0;
-      var camPts = [];
-      f.verts.forEach(function(v){
-        var cp = toCamera(v);
-        camPts.push(cp);
-        sumZ += cp.z;
-        if (cp.z < 0.05) behind++;
-        minZ = Math.min(minZ, cp.z);
-      });
-      if (behind === f.verts.length) return;
-      f.avgZ = sumZ / f.verts.length;
-      f.minZ = minZ;
-      f.camPts = camPts;
-      visible.push(f);
+    // tree billboards join the same list so they interleave correctly with the polygons
+    var sea = cloudSeaStrength();
+    TREES.forEach(function(t){
+      var cpBase = toCamera({x:t.x, y:0, z:t.z});
+      if (cpBase.z < 1 || cpBase.z > 300) return;
+      // once the player is above the cloud layer the distant valley floor is under cloud,
+      // so its trees must go with it - otherwise they float on top of the cloud sea
+      var hidden = sea * clamp((cpBase.z - 30) / 55, 0, 1);
+      if (hidden > 0.97) return;
+      var baseP = project(cpBase);
+      var topP = project(toCamera({x:t.x, y:t.h, z:t.z}));
+      if (!baseP || !topP) return;
+      var screenH = Math.abs(baseP.y - topP.y) * 1.7;
+      if (screenH < 2 || screenH > H*1.4) return;
+      visible.push({ kind:'tree', sortZ: cpBase.z, avgZ: cpBase.z, baseP: baseP,
+                     screenH: screenH, variant: t.v, hidden: hidden });
     });
 
     // sort by each face's NEAREST point rather than its average - a face's average depth
     // is a poor proxy once shapes are large/elongated (like the tower), and using it as the
     // sole sort key is what let closer detail (windows) get painted over incorrectly.
-    visible.sort(function(a,b){ return b.minZ - a.minZ; });
+    visible.sort(function(a,b){ return b.sortZ - a.sortZ; });
 
     visible.forEach(function(f){
+      if (f.kind === 'tree'){ drawTreeBillboard(f, sky); return; }
       var pts = [];
       var n = f.verts.length;
       for (var i = 0; i < n; i++){
@@ -1213,14 +1765,11 @@
       }
       if (pts.length < 3) return;
 
-      var fog = clamp(f.avgZ / 140, 0, 1);
-      var sky = skyColors();
-      var shaded = [ f.color[0]*f.shade, f.color[1]*f.shade, f.color[2]*f.shade ];
-      var finalColor = [
-        lerp(shaded[0], sky.hor[0], fog*0.7),
-        lerp(shaded[1], sky.hor[1], fog*0.7),
-        lerp(shaded[2], sky.hor[2], fog*0.7)
-      ];
+      // Exponential (Beer-Lambert) fog rather than a linear ramp - haze accumulates
+      // multiplicatively with distance in reality, so a linear fade makes near objects too
+      // hazy and far ones not hazy enough. This is what sells the depth of the valley.
+      var fog = 1 - Math.exp(-f.avgZ * 0.0055);
+      var finalColor = faceColor(f, f.shade, fog, sky);
 
       // vertical light/AO gradient per face - top catches sky light, base sinks into shadow -
       // this single change is what keeps flat-shaded polygons from reading as "flat coloured cutouts".
@@ -1237,10 +1786,14 @@
       for (var j = 1; j < pts.length; j++) ctx.lineTo(pts[j].x, pts[j].y);
       ctx.closePath();
 
-      // skip the extra gradient allocation for small/far faces - not visible anyway, and it's
-      // one of the main per-frame costs when many faces are on screen at once
+      // The top-to-bottom gradient exists to shade a whole building wall in one polygon.
+      // On a SUBDIVIDED surface (the tower and chimney shells, flagged noEdge) it is wrong:
+      // every ring re-runs the full bright-top/dark-base ramp, so each ring boundary became a
+      // hard horizontal band straight across the tower. Those meshes get a flat per-face
+      // colour instead - their curvature already comes from the per-face normal shading.
+      // Also skipped for small/far faces, where the gradient allocation is pure cost.
       var screenSize = maxY - minY;
-      if (screenSize > 26){
+      if (screenSize > 26 && !f.noEdge){
         var faceGrad = ctx.createLinearGradient(0, minY, 0, maxY);
         faceGrad.addColorStop(0, rgbStr(topTone));
         faceGrad.addColorStop(0.72, rgbStr(finalColor));
@@ -1249,9 +1802,53 @@
       } else {
         ctx.fillStyle = rgbStr(finalColor);
       }
+
+      // Smooth (Gouraud-style) shading across the curved shells: fill the quad with a
+      // gradient running from its left edge's shade to its right edge's shade, so adjacent
+      // facets agree exactly where they meet and the faceting disappears. Only worth doing
+      // when the quad is actually wide enough on screen to show a step.
+      if (f.noEdge && f.shadeL !== undefined && f.camPts.length === 4 &&
+          f.camPts[0].z > 0.05 && f.camPts[1].z > 0.05 && f.camPts[2].z > 0.05 && f.camPts[3].z > 0.05){
+        var pA = project(f.camPts[0]), pB = project(f.camPts[1]);   // bottom-left, bottom-right
+        var pC = project(f.camPts[3]), pD = project(f.camPts[2]);   // top-left,    top-right
+        if (pA && pB && pC && pD){
+          // A canvas gradient is constant along lines PERPENDICULAR to its axis. Using the
+          // bottom edge as the axis (the obvious choice) is wrong under strong perspective:
+          // the quad's side edges are then not perpendicular to it, so the shade drifts along
+          // each side edge and no longer matches the neighbouring quad there - which is
+          // exactly the seam that survived the first attempt. Instead, aim the axis
+          // perpendicular to the side edges, so the iso-lines run parallel to them and both
+          // quads agree all the way down every shared edge.
+          var ex = (pC.x - pA.x) + (pD.x - pB.x);
+          var ey = (pC.y - pA.y) + (pD.y - pB.y);
+          var elen = Math.hypot(ex, ey);
+          if (elen > 0.001){
+            ex /= elen; ey /= elen;
+            var axx = -ey, axy = ex;                 // unit axis perpendicular to the side edges
+            var sA = pA.x*axx + pA.y*axy;            // where each side edge sits along that axis
+            var sB = pB.x*axx + pB.y*axy;
+            if (Math.abs(sB - sA) > 0.5){
+              var sg = ctx.createLinearGradient(axx*sA, axy*sA, axx*sB, axy*sB);
+              sg.addColorStop(0, rgbStr(faceColor(f, f.shadeL, fog, sky)));
+              sg.addColorStop(1, rgbStr(faceColor(f, f.shadeR, fog, sky)));
+              ctx.fillStyle = sg;
+            }
+          }
+        }
+      }
       ctx.fill();
 
-      if (screenSize > 14){
+      // Canvas antialiases each polygon independently, so two abutting faces leave a faint
+      // half-pixel light line along their shared edge - visible as a hairline grid over the
+      // otherwise smooth shell. Stroking the same path in its own fill style widens it by
+      // half a pixel on each side and closes the gap.
+      if (f.noEdge){
+        ctx.strokeStyle = ctx.fillStyle;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      if (screenSize > 14 && !f.noEdge){
         ctx.strokeStyle = rgbaStr([baseTone[0]*0.55, baseTone[1]*0.55, baseTone[2]*0.55], 0.4);
         ctx.lineWidth = 1;
         ctx.stroke();
@@ -1277,15 +1874,17 @@
     if (widthLen < 2.5 || heightLen < 2) return;
 
     var centerCam = toCamera(f.center);
-    if (centerCam.z < 3 || centerCam.z > 65) return;
+    if (centerCam.z < 3 || centerCam.z > 52) return;
 
-    var cols = clamp(Math.round(widthLen/2.6), 2, 4);
-    var rows = clamp(Math.round(heightLen/3), 2, 3);
+    // More, smaller openings. At the previous size each "window" covered 40% of the wall's
+    // width, so a house read as a glass curtain wall rather than as a house.
+    var cols = clamp(Math.round(widthLen/2.4), 2, 4);
+    var rows = clamp(Math.round(heightLen/3.0), 1, 3);
 
     for (var r = 0; r < rows; r++){
       for (var c = 0; c < cols; c++){
         var u = (c+0.5)/cols, v = 0.14 + ((r+0.5)/rows)*0.74;
-        var wu = 0.4/cols, wv = 0.28/rows;
+        var wu = 0.22/cols, wv = 0.19/rows;
         var corners = [
           lerpVec(w0, uVec, u-wu, vVec, v-wv),
           lerpVec(w0, uVec, u+wu, vVec, v-wv),
@@ -1311,21 +1910,31 @@
         // of the screen - if it does, something projected wrong, so skip it rather than show it
         if (maxX-minX > 180 || maxY-minY > 180) continue;
 
-        var lit = pseudoRandom(f.seed + r*13 + c*3) > 0.6;
+        // Only a minority of windows are lit - it is late afternoon, not night. Unlit glass
+        // is not black either: it mirrors the sky, so it sits mid-tone and slightly blue,
+        // which is what stops a facade looking like a grid of punched holes.
+        var lit = pseudoRandom(f.seed + r*13 + c*3) > 0.78;
         ctx.beginPath();
         ctx.moveTo(pts[0].x, pts[0].y);
         for (var pi = 1; pi < 4; pi++) ctx.lineTo(pts[pi].x, pts[pi].y);
         ctx.closePath();
-        ctx.fillStyle = lit ? 'rgba(255,211,138,0.88)' : 'rgba(24,30,40,0.55)';
+        ctx.fillStyle = lit ? 'rgba(252,214,152,0.82)' : 'rgba(74,90,108,0.70)';
         ctx.fill();
       }
     }
   }
 
+  // The ladder and its holds sit on the tower's front face and are painted AFTER the tower,
+  // so they'd punch straight through the shell whenever the camera walks round the back.
+  // They are only ever visible from the front half of the tower, so gate on that.
+  function ladderVisible(){
+    return cam.pos.z < TOWER.z - 0.5;
+  }
+
   function drawHolds(){
-    if (player.phase === 'top') return;
+    if (player.phase === 'top' || !ladderVisible()) return;
     HOLDS.forEach(function(h){
-      var world = { x: TOWER.x + h.x, y: h.y, z: WALL_Z - 0.12 };
+      var world = ladderPoint(TOWER.x + h.x, h.y, 0.14);
       var cp = toCamera(world);
       if (cp.z < 0.1) return;
       var p = project(cp);
@@ -1343,24 +1952,107 @@
   }
 
   function drawLadder(){
-    if (player.phase === 'top') return;
+    if (player.phase === 'top' || !ladderVisible()) return;
     ctx.strokeStyle = 'rgba(40,32,26,0.75)';
     ctx.lineWidth = 2.4;
-    var railX0 = TOWER.x - 1.15, railX1 = TOWER.x + 1.15, z = WALL_Z - 0.1;
-    drawWorldLine({x:railX0,y:0,z:z}, {x:railX0,y:TOWER.height,z:z});
-    drawWorldLine({x:railX1,y:0,z:z}, {x:railX1,y:TOWER.height,z:z});
+    var railX0 = TOWER.x - 1.15, railX1 = TOWER.x + 1.15;
+    // rails drawn as polylines so they follow the shell's curve up the tower
+    var STEPS = 16;
+    for (var s = 0; s < STEPS; s++){
+      var yA = (s/STEPS)*TOWER.height, yB = ((s+1)/STEPS)*TOWER.height;
+      drawWorldLine(ladderPoint(railX0, yA), ladderPoint(railX0, yB));
+      drawWorldLine(ladderPoint(railX1, yA), ladderPoint(railX1, yB));
+    }
     ctx.lineWidth = 1.6;
     for (var y = 1; y < TOWER.height; y += 1.4){
-      drawWorldLine({x:railX0,y:y,z:z}, {x:railX1,y:y,z:z});
+      // While climbing, the camera sits only ~0.4 units from the ladder plane, so the rung at
+      // eye level projects to a bar spanning the entire screen - it read as a stray line
+      // drawn across the whole scene. Skip rungs that are practically touching the lens.
+      if (Math.abs(y - cam.pos.y) < 1.25 && player.phase === 'climbing') continue;
+      drawWorldLine(ladderPoint(railX0, y), ladderPoint(railX1, y));
     }
   }
 
-  function drawGroundShadow(cx, cz, r, alpha){
+  // Horizontal direction a shadow is cast in: directly away from the sun.
+  var SHADOW_DIR = (function(){
+    var hx = -LIGHT_DIR.x, hz = -LIGHT_DIR.z;
+    var l = Math.hypot(hx, hz) || 1;
+    return { x: hx/l, z: hz/l };
+  })();
+
+  // Shadows are now cast: offset away from the sun and stretched along that direction by
+  // the object's height, instead of a symmetric puddle centred under everything. A blob
+  // directly beneath an object reads as "sticker on the ground"; a shadow that leans away
+  // from the light is what actually plants it in the scene. The stretch is deliberately
+  // shorter than physically correct (0.45x rather than ~1.9x at this sun elevation) - a true
+  // 80-metre tower shadow would swallow half the valley.
+  // Painted hazard line just inside the rim of the top platform. Industrial walkways really
+  // are marked like this, and it doubles as the thing the vertigo mechanic needs: without it
+  // the platform edge is invisible against the drop, so the player cannot see where "the
+  // edge" actually is until the screen starts shaking.
+  // Concrete joint pattern on the top deck. Standing on the platform it fills a third of the
+  // screen, and as a single untextured polygon it read as a flat grey blob with no sense of
+  // size or of the player moving across it. Radial + concentric joints give it both.
+  // Draws a horizontal circle at radius r on the rim plane, breaking the path wherever the
+  // circle passes behind the camera (which it does constantly - the player stands inside it).
+  function strokeRimCircle(r, y){
+    ctx.beginPath();
+    var started = false;
+    for (var i = 0; i <= 56; i++){
+      var a = (i/56)*Math.PI*2;
+      var cp = toCamera({ x: TOWER.x + Math.cos(a)*r, y: y, z: TOWER.z + Math.sin(a)*r });
+      if (cp.z < 0.4){ started = false; continue; }
+      var p = project(cp);
+      if (!p){ started = false; continue; }
+      if (!started){ ctx.moveTo(p.x, p.y); started = true; }
+      else ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+  }
+
+  function drawPlatformDeck(){
+    if (cam.pos.y < TOWER.height - 6) return;
+    var y = TOWER_VIS.height + 0.02;
+    // joints across the gallery only - there is no deck over the shaft any more
+    ctx.strokeStyle = 'rgba(92,94,92,0.40)';
+    ctx.lineWidth = 1.2;
+    strokeRimCircle(lerp(TOWER_HOLE_R, TOWER_RIM_R, 0.5), y);
+    for (var k = 0; k < 24; k++){
+      var a2 = (k/24)*Math.PI*2;
+      drawWorldLine({ x: TOWER.x + Math.cos(a2)*TOWER_HOLE_R, y: y, z: TOWER.z + Math.sin(a2)*TOWER_HOLE_R },
+                    { x: TOWER.x + Math.cos(a2)*TOWER_RIM_R,  y: y, z: TOWER.z + Math.sin(a2)*TOWER_RIM_R });
+    }
+  }
+
+  function drawPlatformRim(){
+    if (cam.pos.y < TOWER.height - 6) return;
+    var y = TOWER_VIS.height + 0.03;
+    // hazard line inside the outer parapet...
+    ctx.strokeStyle = 'rgba(226,188,64,0.7)';
+    ctx.lineWidth = 3;
+    strokeRimCircle(TOWER_RIM_R - 0.55, y);
+    // ...and a second, brighter one round the open shaft, which is the edge that actually
+    // drops 160 m straight down the inside of the tower
+    ctx.strokeStyle = 'rgba(238,196,58,0.85)';
+    ctx.lineWidth = 3.5;
+    strokeRimCircle(TOWER_HOLE_R + 0.4, y);
+  }
+
+  function drawGroundShadow(cx, cz, r, alpha, height){
+    var reach = (height || 0) * 0.45;
+    var ox = SHADOW_DIR.x * reach * 0.5, oz = SHADOW_DIR.z * reach * 0.5;
+    var along = r + reach * 0.5, across = r;
+    var perpX = -SHADOW_DIR.z, perpZ = SHADOW_DIR.x;
     var pts = [];
-    var segN = 12;
+    var segN = 16;
     for (var i = 0; i <= segN; i++){
       var a = (i/segN)*Math.PI*2;
-      pts.push({ x: cx + Math.cos(a)*r, y:0.02, z: cz + Math.sin(a)*r });
+      var ca = Math.cos(a)*along, sa = Math.sin(a)*across;
+      pts.push({
+        x: cx + ox + SHADOW_DIR.x*ca + perpX*sa,
+        y: 0.02,
+        z: cz + oz + SHADOW_DIR.z*ca + perpZ*sa
+      });
     }
     var proj = [];
     var minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
@@ -1384,11 +2076,11 @@
   }
 
   function drawContactShadow(){
-    drawGroundShadow(TOWER.x, TOWER.z, 7.8, 0.35);
-    drawGroundShadow(CHIMNEY.x, CHIMNEY.z, CHIMNEY.baseR+0.8, 0.3);
+    drawGroundShadow(TOWER.x, TOWER.z, 7.8, 0.32, TOWER.height);
+    drawGroundShadow(CHIMNEY.x, CHIMNEY.z, CHIMNEY.baseR+0.8, 0.26, CHIMNEY.height);
     AUX_BUILDINGS.forEach(function(b){
       if (Math.hypot(b.x-cam.pos.x, b.z-cam.pos.z) > 150) return;
-      drawGroundShadow(b.x, b.z, Math.max(b.halfW,b.halfD)*1.25, 0.28);
+      drawGroundShadow(b.x, b.z, Math.max(b.halfW,b.halfD)*1.15, 0.26, b.height);
     });
   }
 
@@ -1422,17 +2114,16 @@
     });
   }
 
-  function drawTrees(){
-    TREES.forEach(function(t){
-      var cpBase = toCamera({x:t.x, y:0, z:t.z});
-      if (cpBase.z < 1 || cpBase.z > 280) return;
-      var baseP = project(cpBase);
-      var topP = project(toCamera({x:t.x, y:t.h, z:t.z}));
-      if (!baseP || !topP) return;
-      var screenH = Math.abs(baseP.y - topP.y) * 1.7;
-      if (screenH < 2 || screenH > H*1.2) return;
-      ctx.drawImage(TREE_SPRITE, baseP.x-screenH/2, baseP.y-screenH, screenH, screenH);
-    });
+  // One tree, drawn from inside the shared depth-sorted pass (see drawBuildings).
+  // Aerial perspective is done by fading the sprite toward transparent rather than by
+  // tinting it: whatever is already painted behind it is the hazy background, so a lower
+  // alpha reads as exactly the right amount of fog - and costs nothing extra to draw.
+  function drawTreeBillboard(t, sky){
+    var sprite = TREE_SPRITES[t.variant || 0] || TREE_SPRITES[0];
+    var fog = 1 - Math.exp(-t.avgZ * 0.0055);
+    ctx.globalAlpha = clamp(1 - fog*0.62, 0.20, 1) * (1 - (t.hidden || 0));
+    ctx.drawImage(sprite, t.baseP.x - t.screenH/2, t.baseP.y - t.screenH, t.screenH, t.screenH);
+    ctx.globalAlpha = 1;
   }
 
   function drawSmoke(ts){
@@ -1456,11 +2147,84 @@
     ctx.globalAlpha = 1;
   }
 
+  // Final full-screen grade. Two cheap gradient passes standing in for what a real engine
+  // would do with a post-process chain: a warm atmospheric bloom radiating from wherever the
+  // sun actually is on screen, and a cool lift in the lower (shadowed) part of the frame.
+  // Warm light / cool shadow is the single most effective trick for making flat-shaded
+  // geometry look photographed rather than drawn.
+  function drawColorGrade(){
+    var sunP = project(toCamera(SUN_WORLD));
+    if (sunP && sunP.x > -W*0.6 && sunP.x < W*1.6 && sunP.y < H*1.4){
+      var r = Math.max(W, H) * 0.95;
+      var g = ctx.createRadialGradient(sunP.x, sunP.y, 0, sunP.x, sunP.y, r);
+      g.addColorStop(0,   'rgba(255,214,150,0.13)');
+      g.addColorStop(0.45,'rgba(255,198,142,0.07)');
+      g.addColorStop(1,   'rgba(255,190,140,0)');
+      ctx.globalCompositeOperation = 'screen';
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    var cg = ctx.createLinearGradient(0, H*0.5, 0, H);
+    cg.addColorStop(0, 'rgba(20,30,48,0)');
+    cg.addColorStop(1, 'rgba(18,28,46,0.10)');
+    ctx.fillStyle = cg;
+    ctx.fillRect(0, H*0.5, W, H*0.5);
+
+    if (GRAIN_TILE){
+      ctx.globalCompositeOperation = 'overlay';
+      ctx.globalAlpha = 0.032;
+      for (var gx = 0; gx < W; gx += 256){
+        for (var gy = 0; gy < H; gy += 256) ctx.drawImage(GRAIN_TILE, gx, gy);
+      }
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  }
+
+  // The steam plume out of the cooling tower's mouth. This is the thing you actually see for
+  // miles around TEŠ - and it is water vapour off the cooling circuit, not flue gas, so it is
+  // white, enormous, and much softer-edged than the chimney's exhaust. Puffs are sized from a
+  // real world radius projected through the camera, so the column widens with height and
+  // shrinks correctly with distance instead of being a fixed screen-space blob.
+  function drawTowerSteam(ts){
+    var baseY = TOWER_VIS.height - 1;
+    var now = ts * 0.001;
+    // 18 overlapping puffs rather than 10: a real plume leaves the mouth as one dense
+    // continuous column, and at the lower count it broke into a visible string of separate
+    // blobs climbing the sky
+    var N = 26;
+    for (var i = 0; i < N; i++){
+      var age = ((now*0.075 + i/N) % 1);
+      // shorter rise + more puffs = ~2.2 units between puffs against a puff diameter of ~10,
+      // so they genuinely overlap into a column instead of reading as a rising string of blobs
+      var y = baseY + age*58;
+      var spread = TOWER_RIM_R*0.85 + age*24;
+      // a steady lean downwind (quadratic, so it starts vertical out of the mouth and bends
+      // over as it rises) plus a little wander - the old pure sine made the plume snake
+      var drift = age*age*20 + Math.sin(now*0.22 + i*2.1) * age * 5;
+      var cp = toCamera({ x: TOWER.x + drift, y: y, z: TOWER.z });
+      if (cp.z < 1) continue;
+      var p = project(cp);
+      if (!p) continue;
+      var e = project(toCamera({ x: TOWER.x + drift + spread, y: y, z: TOWER.z }));
+      if (!e) continue;
+      var sz = Math.abs(e.x - p.x) * 2;
+      if (sz < 3 || sz > W*4) continue;
+      // full strength almost immediately out of the mouth (a slow fade-in left an obvious
+      // empty gap between the tower rim and the start of the plume), then thins as it disperses
+      ctx.globalAlpha = Math.min(age*14, 1) * Math.pow(1 - age, 1.3) * 0.42;
+      ctx.drawImage(CLOUD_SPRITE, p.x - sz/2, p.y - sz/2, sz, sz);
+    }
+    ctx.globalAlpha = 1;
+  }
+
   function drawVertigoOverlay(){
-    // subtle always-on vignette for cinematic depth
-    var baseVg = ctx.createRadialGradient(W/2, H/2, H*0.45, W/2, H/2, H*0.95);
+    // subtle always-on vignette - kept light (a heavy dark ring round the frame is a
+    // videogame tell; real lens falloff is far gentler than the 0.32 this used to use)
+    var baseVg = ctx.createRadialGradient(W/2, H/2, H*0.52, W/2, H/2, H*1.02);
     baseVg.addColorStop(0, 'rgba(0,0,0,0)');
-    baseVg.addColorStop(1, 'rgba(5,6,8,0.32)');
+    baseVg.addColorStop(1, 'rgba(6,8,12,0.20)');
     ctx.fillStyle = baseVg;
     ctx.fillRect(0,0,W,H);
 
@@ -1474,25 +2238,31 @@
 
   // ---------------- main loop ----------------
   var lastT = 0;
+  var lastFrameTs = 0;
   function frame(ts){
     if (!lastT) lastT = ts;
     var dt = Math.min((ts - lastT)/1000, 0.05);
     lastT = ts;
+    lastFrameTs = ts;
 
     update(dt);
     updateCamera();
 
     drawSkyGround();
+    drawGrassDetail();
     drawContactShadow();
     drawRoad();
     drawPylons();
     drawGasStationPoles();
-    drawTrees();
-    drawBuildings();
+    drawBuildings();   // now also draws the trees, depth-sorted together with the polygons
+    drawPlatformDeck();
+    drawPlatformRim();
+    drawTowerSteam(ts);
     drawSmoke(ts);
     drawLadder();
     drawHolds();
-    drawVertigoOverlay();
+    drawColorGrade();      // sun bloom + grade first...
+    drawVertigoOverlay();  // ...so the vignette stays the last thing on top
 
     requestAnimationFrame(frame);
   }
